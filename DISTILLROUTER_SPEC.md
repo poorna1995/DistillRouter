@@ -1,219 +1,276 @@
-# DistillRouter — A Lightweight Distilled Router
+# DistillRouter: Distilling a Large Language Model Routing Policy into a Lightweight Student Router
 
-**Status:** design spec v2 (verified) · **Last updated:** 2026-08-07
+**Working design document — v3**
+**Last revised:** 2026-08-07
 
----
+## Abstract
 
-## 1. Problem Statement
+Model-routing systems for multi-tier LLM serving use a large model, or a large
+dedicated router, to decide which downstream model should answer an incoming
+query. This routing step is placed on the critical path of every request,
+so its own inference cost and latency are added to the cost and latency of
+the model it eventually selects. We propose DistillRouter, a study of
+whether the routing policy of a large _teacher router_ can be distilled into
+a substantially smaller _student router_ without a material loss in routing
+quality. We formulate routing as a discrete tier-classification problem
+supervised jointly by (i) an empirical oracle signal, obtained by executing
+each candidate tier and scoring it against task-specific correctness
+metrics, and (ii) a soft label distribution elicited from a large language
+model prompted to predict the oracle outcome from the query text alone. This
+document specifies the benchmark suite, the model family and tier selection,
+the teacher-labeling protocol, the student training objective, and the
+evaluation methodology used to test this hypothesis.
 
-Can the routing policy learned by a large language model be compressed into a
-significantly smaller model while preserving routing quality?
+## 1. Introduction
 
-Modern multi-model LLM applications use a large model (or a large *router*
-component) to decide which downstream model should answer an incoming query.
-This is accurate but adds a large model's latency and cost to every request,
-on the critical path, before the "real" answering model even starts.
+### 1.1 Motivation
 
-**Goal:** distill the routing knowledge of a large **teacher router** into a
-much smaller **student router**, keeping routing accuracy close to the
-teacher's while cutting routing-decision latency by an order of magnitude or
-more.
+Production systems that serve multiple LLMs of varying capacity and cost
+face a routing problem: for each incoming query, decide which model should
+generate the response, trading off answer quality against latency and
+inference cost. A common architecture places a large, capable model at this
+decision point, since the routing decision itself benefits from the same
+reasoning capacity needed to judge query difficulty (Ong et al., 2024; Lu et
+al., 2023). This is effective but self-defeating in latency terms: the
+router now contributes a large model's forward-pass latency to _every_
+request, including the large share of requests that a much smaller model
+could have answered correctly on its own.
 
-**Core assumptions** (stated explicitly, carried through the whole design):
+### 1.2 Problem Statement
 
-1. Larger parameter-count models generally have more reasoning capability
-   than smaller ones on complex tasks — this is *why* parameter-tier routing
-   is a sensible target to imitate. (True on average across model
-   generations; not guaranteed for any single query, which is precisely the
-   noise the router has to learn to handle.)
-2. Query difficulty is predictable from the input text alone, without
-   executing multiple candidate models first — otherwise routing at
-   inference time is impossible.
-3. A lightweight student model can approximate a large teacher's routing
-   function through supervised distillation, because routing is a much
-   lower-complexity function (a 3–4-way classification) than actually
-   answering the query.
+Can the routing policy learned by a large language model be compressed into
+a significantly smaller model while preserving routing quality? We take
+"routing quality" to mean agreement with the tier that would, in fact, have
+answered the query correctly at the lowest cost — not merely agreement with
+the teacher's own predictions, which may themselves be miscalibrated.
 
----
+## 3. Benchmark Suite
 
-## 2. Offline Phase (Training)
+Dataset facts below are drawn from the original dataset papers and official
+dataset cards, independent of the routing literature, and cross-checked
+against each source directly.
 
-### 2.1 Benchmark Datasets
+### 3.1 Mathematical Reasoning
 
-All figures below are pulled from the official dataset cards / papers, not
-the routing literature — verify against the source links if you pin exact
-numbers into a paper.
+**GSM8K** (Cobbe et al., 2021) consists of 8,792 grade-school arithmetic
+word problems (7,473 train / 1,319 test), each requiring 2–8 steps of
+elementary arithmetic to solve. The dataset carries no explicit difficulty
+annotation. Correctness is conventionally assessed by exact-match on the
+final numeric answer, extracted from a `####`-delimited line in the
+reference solution (not an `<answer>` tag, as an earlier draft of this
+document stated); a custom evaluation prompt may substitute any consistent
+delimiter, provided the extraction regex is applied uniformly across models.
 
-#### Math
+**MATH** (Hendrycks et al., 2021) consists of 12,500 competition
+mathematics problems (7,500 train / 5,000 test) spanning seven subject
+areas — Prealgebra, Algebra, Number Theory, Counting & Probability,
+Geometry, Intermediate Algebra, and Precalculus — drawn from sources
+including AMC and AIME. Critically, MATH carries an explicit five-level
+difficulty annotation (1 = easiest, 5 = competition/olympiad-level), which
+is the only ground-truth difficulty signal available anywhere in this
+benchmark suite and should be used to sanity-check that the learned routing
+policy's tier assignments correlate with a real difficulty axis, rather
+than only with surface-level features of the query. Correctness is assessed
+by exact-match on the content of the final `\boxed{}` expression, following
+normalization (LaTeX canonicalization, equivalence of `\frac{1}{2}`, `0.5`,
+and `1/2`, removal of units and thousands separators) and, in stricter
+harnesses, symbolic equivalence checking via computer algebra (the
+"Minerva" evaluation protocol).
 
-| | **GSM8K** | **MATH** (Hendrycks et al.) |
-|---|---|---|
-| Splits | train 7,473 / test 1,319 (8,792 total) | train 7,500 / test 5,000 (12,500 total) |
-| Difficulty | 2–8 reasoning steps per problem, grade-school arithmetic, no explicit difficulty label | 5 explicit difficulty levels (1=easiest → 5=competition/olympiad), across 7 subject areas (Prealgebra, Algebra, Number Theory, Counting & Probability, Geometry, Intermediate Algebra, Precalculus) |
-| Correctness metric | Exact-match on the final numeric answer, conventionally extracted after a `####` delimiter in the reference solution (not `<answer>` — that was a mislabel in the earlier draft; use `####` or an explicit `Answer:` line in your own prompt template, then regex out the trailing number) | Exact-match on the content of the final `\boxed{}`, after symbolic normalization (LaTeX → canonical form, `\frac{1}{2}` vs `0.5` vs `1/2` treated as equal, units/thousands-separators stripped), then compared as strings or via SymPy symbolic equivalence (the "Minerva" harness approach) |
-| Source | [openai/gsm8k](https://huggingface.co/datasets/openai/gsm8k) | [hendrycks-MATH-benchmark](https://huggingface.co/datasets/nlile/hendrycks-MATH-benchmark) |
+### 3.2 Open-Domain and Multi-Hop Question Answering
 
-**Design note:** MATH's level 1–5 tag is the single cleanest ground-truth
-"difficulty" signal in the whole benchmark suite — use it directly as a
-sanity check that your teacher's routing labels correlate with something
-real (e.g., level 1–2 → mostly routed Small, level 4–5 → mostly routed
-Large).
+**TriviaQA** (Joshi et al., 2017) is a reading-comprehension and
+open-domain QA dataset comprising over 650K question-answer-evidence
+triples across its subsets (`rc`, `rc.web`, `rc.wikipedia`, and the
+open-domain `unfiltered` variant, each with a context-free `.nocontext`
+counterpart), covering roughly 95K distinct question-answer pairs with
+approximately six evidence documents per question on average. The `rc`
+configuration splits as train 138K / validation 17.9K / test 17.2K; because
+official test-set answers are withheld for leaderboard purposes, the
+validation split should be used as the held-out set for offline routing
+evaluation. Correctness is scored as exact-match or token-F1 against a set
+of accepted answer aliases, since a single fact typically has multiple
+valid surface realizations.
 
-#### General Knowledge / Multi-hop QA
+**HotpotQA** (Yang et al., 2018) is a multi-hop QA dataset of 112,779
+examples in total, split into train-easy/medium/hard, dev (7,405), and
+test (7,405, with hidden labels) — dev should serve as the held-out set.
+Its `distractor` setting provides ten paragraphs per question (two gold,
+eight distractors), while `fullwiki` requires retrieval over the entire
+Wikipedia corpus. Correctness is measured by exact-match and F1 over the
+predicted answer span, together with a separate supporting-fact F1 that
+scores whether the model correctly identified the gold evidence paragraphs
+— a useful auxiliary signal for whether genuine multi-hop reasoning
+occurred, as opposed to a lucky single-hop guess.
 
-| | **TriviaQA** | **HotpotQA** |
-|---|---|---|
-| Subsets | `rc` (reading-comprehension, evidence docs attached), `rc.web`, `rc.wikipedia`, `unfiltered` (open-domain, no guaranteed answer-bearing doc); each has a `.nocontext` variant that strips evidence down to bare Q/A pairs | `distractor` (10 paragraphs: 2 gold + 8 distractors), `fullwiki` (retrieval over the full Wikipedia dump) |
-| Splits | `rc`: train 138k / validation 17.9k / test 17.2k. `unfiltered`: ~110k QA pairs total (train/validation/test are a subsplit of that); use **validation** as your held-out offline-eval set since `test` answers are hidden for the official leaderboard | train 90,447 / dev 7,405 / test 7,405 (test labels hidden — use dev as your held-out set) |
-| Correctness metric | Exact-match / token-F1 against a **set of answer aliases** (TriviaQA ships multiple accepted surface forms per answer) | EM and F1 on the predicted answer span, **plus** a separate supporting-fact F1 that scores whether the model cited the correct 2 gold paragraphs — useful as an auxiliary "did it actually reason across hops" signal |
-| Total size | ~650K question-answer-evidence triples across all subsets/splits; ~95K distinct question-answer pairs, ~6 evidence docs per question on average | 112,779 examples total across train-easy/medium/hard + dev + test splits |
-| Source | [mandarjoshi/trivia_qa](https://huggingface.co/datasets/mandarjoshi/trivia_qa) | [hotpotqa/hotpot_qa](https://huggingface.co/datasets/hotpotqa/hotpot_qa) |
+Neither TriviaQA nor HotpotQA carries an explicit difficulty label
+comparable to MATH's. As weak difficulty proxies, this design uses hop
+count (single- vs. multi-hop question structure) for HotpotQA and answer
+rarity / evidence-document count for TriviaQA — these are heuristics for
+sanity-checking learned routing behavior, not substitutes for ground truth.
 
-**Design note:** neither dataset carries an explicit difficulty label like
-MATH does. Use **number of reasoning hops** as a proxy for HotpotQA
-(single-hop-shaped questions vs. genuine 2-hop) and **answer rarity /
-document count** as a weak proxy for TriviaQA (common-knowledge trivia vs.
-long-tail facts needing the full evidence set). Don't treat these as ground
-truth difficulty — they're only useful for *sanity-checking* the teacher's
-labels, the same way MATH's levels are.
+### 3.3 Code Generation
 
-#### Coding
+**HumanEval** (Chen et al., 2021) provides 164 hand-written Python
+programming problems, each with a function signature, docstring, and an
+average of 7.7 hidden unit tests, released as a single evaluation-only set
+with no train/test split. Because no training partition exists, HumanEval
+cannot be used to generate teacher-labeled training data without
+contaminating it as an evaluation set; it must be reserved entirely for
+held-out evaluation. Correctness is scored by pass@k over the hidden test
+suite.
 
-| | **HumanEval** | **MBPP** |
-|---|---|---|
-| Splits | Single set, 164 problems, no train/test split — used entirely for eval | Full: train 601–974 (374) / test 11–510 (500) / validation 511–600 (90) / few-shot prompt 1–10 (10). Sanitized subset: 427 hand-verified problems (most commonly reported number today) |
-| Correctness metric | pass@k — generated code executed against hidden unit tests, ~7.7 tests/problem on average | pass@k — executed against ~3 assert-based unit tests per problem |
-| Total size | 164 problems | 974 (full) / 427 (sanitized) |
-| Source | [openai/openai_humaneval](https://huggingface.co/datasets/openai/openai_humaneval) | [google-research/mbpp](https://github.com/google-research/google-research/tree/master/mbpp) |
+**MBPP** (Austin et al., 2021) consists of 974 entry-level Python
+programming problems, each with roughly three assert-based unit tests, of
+which a 427-problem "sanitized" subset has been hand-verified for solution
+and test correctness and is the more commonly reported configuration in
+recent literature. The full set's canonical partition assigns task IDs
+601–974 to training, 11–510 to evaluation, 511–600 to validation, and 1–10
+to few-shot prompting. Correctness is scored by pass@k against the
+associated unit tests.
 
-**Design note:** HumanEval has no train split at all — you cannot use it to
-generate teacher-labeled *training* data without contaminating your own
-eval set. Use MBPP's train/validation splits (or the sanitized-427 train
-portion) to build the coding slice of the routing-training set, and reserve
-**HumanEval in full + MBPP test** as held-out coding eval only.
+The coding slice of the training mixture is therefore drawn from MBPP's
+train/validation partitions, with HumanEval (in full) and MBPP's evaluation
+partition reserved as held-out coding benchmarks.
 
-#### Consolidated dataset-to-tier expectation
+### 3.4 Distribution Considerations and Synthetic Augmentation
 
-| Domain | Dataset slice | Expected routing skew |
-|---|---|---|
-| Math | GSM8K | Skews Small/Medium — most problems solvable by small models |
-| Math | MATH levels 1–2 | Skews Small/Medium |
-| Math | MATH levels 4–5 | Skews Medium/Large |
-| Knowledge | TriviaQA (common facts) | Skews Ultra-Small/Small |
-| Knowledge | HotpotQA (multi-hop) | Skews Medium/Large |
-| Coding | MBPP | Skews Small/Medium |
-| Coding | HumanEval | Skews Medium/Large |
+Table 1 summarizes the expected routing-label skew of each benchmark slice,
+based on the difficulty characteristics above.
 
-This table matters operationally: if you only train on GSM8K + MBPP, your
-router will almost never learn to emit "Large," and the student will
-undersample that class. Deliberately balance the training mixture across
-rows so all four router labels appear with reasonable frequency.
+**Table 1. Expected routing skew by dataset slice.**
 
-### 2.2 Synthetic Dataset
+| Domain    | Dataset slice                       | Expected routing skew |
+| --------- | ----------------------------------- | --------------------- |
+| Math      | GSM8K                               | Small / Medium        |
+| Math      | MATH levels 1–2                     | Small / Medium        |
+| Math      | MATH levels 4–5                     | Medium / Large        |
+| Knowledge | TriviaQA (common-knowledge queries) | Ultra-Small / Small   |
+| Knowledge | HotpotQA (multi-hop)                | Medium / Large        |
+| Coding    | MBPP                                | Small / Medium        |
+| Coding    | HumanEval                           | Medium / Large        |
 
-The benchmarks above are real but skewed (see table above) and static (finite,
-memorizable, eventually leak into model training corpora). Add a synthetic
-slice for two reasons:
+Because no individual benchmark alone is balanced across all tiers, a
+training mixture drawn naively from these sources (e.g., GSM8K and MBPP
+alone) would under-represent the "Large" tier and bias the student toward
+never emitting it. To correct for this, a synthetic query set is
+introduced, constituting approximately 15–20% of total training volume,
+generated by conditioning a strong generator model on (a) a target domain,
+(b) a target difficulty descriptor, and (c) a small number of real seed
+examples for stylistic grounding. Synthetic queries are not hand-labeled;
+they are passed through the identical oracle-labeling procedure described
+in Section 5, so no additional labeling-noise pathway is introduced beyond
+what already exists for real benchmark data. The purpose of the synthetic
+set is twofold: correcting class imbalance across routing tiers, and
+reducing the risk that the router learns benchmark-specific surface
+patterns (a fixed phrasing style, a specific entity distribution) rather
+than a generalizable difficulty signal.
 
-1. **Class balance** — deliberately generate queries targeting the
-   under-represented tiers (e.g., synthetic ultra-easy factual lookups for
-   "Ultra-Small," synthetic multi-constraint word problems or obscure
-   multi-hop trivia for "Large") so the student sees enough examples of
-   every label to avoid majority-class collapse.
-2. **Distribution robustness** — paraphrase/perturb real benchmark questions
-   (reword surface form, swap named entities, combine two GSM8K-style
-   sub-problems into one multi-step problem) so the router doesn't just
-   memorize surface patterns tied to a specific benchmark's phrasing style.
+## 4. Model Family and Tier Taxonomy
 
-**Generation method:** use the teacher-tier LLM itself (or a separate strong
-generator model) to produce new queries conditioned on: (a) a target domain
-(math/knowledge/code), (b) a target difficulty descriptor, and (c) a few
-real seed examples from that domain/difficulty for style-grounding. Every
-synthetic query still goes through the same oracle-labeling pipeline
-(Section 2.4) — it is **not** hand-labeled, so it can't leak label noise
-that the oracle process wouldn't already have.
+### 4.1 Tier Definitions
 
-Target size: roughly 15–20% of the total training set, capped so the
-majority of supervision still comes from real, externally-validated
-benchmarks.
+Four tiers are defined by parameter count, following common usage in the
+routing literature. Table 2 lists representative models per tier,
+cross-checked against each family's official release material.
 
-### 2.3 Model Roster
+**Table 2. Router tier taxonomy with verified example models.**
 
-Three *different* roles need models, and they should not be conflated:
+| Tier        | Parameter range | Verified example models                                                                        |
+| ----------- | --------------- | ---------------------------------------------------------------------------------------------- |
+| Ultra-Small | < 1B            | Qwen2.5-0.5B, Qwen3-0.6B, Gemma 3 270M                                                         |
+| Small       | 1B–4B           | Llama 3.2 1B/3B, Qwen2.5 1.5B/3B, Qwen3 1.7B/4B, Gemma 3 1B/4B, Phi-3-Mini / Phi-4-Mini (3.8B) |
+| Medium      | 7B–14B          | Qwen3-8B, Qwen2.5-14B, Gemma 2 9B, Gemma 3 12B, Phi-3-Small (7B), Phi-3-Medium / Phi-4 (14B)   |
+| Large       | 30B–72B         | Qwen2.5-32B, Qwen2.5-72B, Llama 3.1-70B                                                        |
 
-1. **Candidate pool** — the models actually being routed to, one per tier,
-   which generate the final answer.
-2. **Teacher router** — the large model whose *routing decision* (not
-   answering ability) is being distilled.
-3. **Student router** — the small model being trained to imitate the
-   teacher's routing decision.
+Two corrections to an earlier draft of this taxonomy are noted for the
+record. First, a fourth-generation Gemma release ("Gemma 4") exists as of
+this writing (April 2026), but its size configuration — 2.3B/4.5B
+effective-parameter models using per-layer embeddings, a 12B dense
+multimodal model, a 26B mixture-of-experts model activating 3.8B parameters
+per token, and a 31B dense model — does not map cleanly onto the tier
+boundaries used here, and its tooling and evaluation-harness support remain
+comparatively immature soon after release; Gemma 3 (270M/1B/4B/12B/27B) is
+used instead for reproducibility. Second, Gemma 2 was released only at 9B
+and 27B; the "Gemma 2 9B" and "Gemma 3 12B" entries in Table 2 both remain
+distinct, correct models rather than duplicate references to the same one.
 
-#### Tier definitions (verified parameter counts)
+### 4.2 Family Selection
 
-| Router Label | Parameter Range | Verified example models |
-|---|---|---|
-| Ultra Small | < 1B | Qwen2.5-0.5B, Qwen3-0.6B, Gemma 3 270M |
-| Small | 1B–4B | Llama 3.2 1B/3B, Qwen2.5 1.5B/3B, Qwen3 1.7B/4B, Gemma 3 1B/4B, Phi-3-Mini/Phi-4-Mini 3.8B |
-| Medium | 7B–14B | Qwen3-8B, Qwen2.5-14B, Gemma 2 9B, Gemma 3 12B, Phi-3-Small 7B, Phi-3-Medium/Phi-4 14B |
-| Large | 30B–72B | Qwen2.5-32B, Qwen2.5-72B, Llama 3.1-70B |
+Two configurations are considered: models drawn from a single family
+across all tiers, versus models drawn from multiple families.
 
-Corrections from the original draft:
-- The GSM8K delimiter is `####`, not `<answer>`.
-- "Gemma 4" is real (Google shipped it April 2026: E2B/E4B/12B-dense/26B-MoE/31B-dense), but its sizes don't map cleanly onto this tier table and tooling/eval support is still thin months after release — **use Gemma 3** (270M/1B/4B/12B/27B) for reproducibility; revisit Gemma 4 once the ecosystem catches up.
-- Gemma 2 tops out at 9B/27B (no 12B) — the "Gemma 3 12B" and "Gemma 2 9B" entries in the Medium row are both correct and distinct models; don't merge them.
+**Table 3. Family selection: same-family vs. cross-family.**
 
-#### Family choice: Option A (same-family) recommended as primary
+|                        | Same-family (primary)                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Cross-family (secondary)                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Composition            | Qwen (Qwen2.5 and Qwen3 generations)                                                                                                                                                                                                                                                                                                                                                                                                                                             | Qwen, Llama, Gemma, Phi, Mistral, DeepSeek                                                                                                                                                                                                                                                                                                                      |
+| Rationale              | Qwen is, at the time of writing, the only family with a released model at every tier defined in Table 2 — from 0.5B/0.6B through 72B — sharing a tokenizer and architectural lineage across generations. This removes vocabulary, tokenizer, and instruction-tuning style as confounds, so any measured routing-accuracy or task-accuracy gap can be attributed to parameter count and distillation quality rather than to idiosyncrasies of a particular lab's training recipe. | More representative of production routing stacks, which typically front heterogeneous vendors and architectures. However, it confounds architecture- and training-recipe differences with the difficulty signal the router is meant to learn, making it harder to attribute a routing error to a genuine difficulty misjudgment versus a family-specific quirk. |
+| Position in this study | Primary configuration; validates the central hypothesis (Section 1.2) under controlled conditions.                                                                                                                                                                                                                                                                                                                                                                               | Secondary robustness/generalization check, run after the primary configuration is validated, reusing the same teacher-labeled query set and substituting which model answers at each tier.                                                                                                                                                                      |
 
-| | Option A — Same Family | Option B — Cross Family |
-|---|---|---|
-| Pick | **Qwen** (Qwen2.5 + Qwen3 generations) | Qwen, Llama, Gemma, Phi, Mistral, DeepSeek |
-| Why it's primary | Qwen is the **only** family with a released model at every tier — 0.5B/0.6B, 1.5B–4B, 7B–14B, up to 72B — on a shared tokenizer and architecture lineage. That removes vocabulary/tokenizer/instruction-tuning-style as confounding variables, so any accuracy gap you measure is attributable to *parameter count and distillation quality*, not to "which lab trained it." | Matches production reality — real routing stacks front heterogeneous vendors. Confounds architecture/training-recipe differences with the difficulty signal, making it harder to isolate whether a routing error is a genuine difficulty misjudgment or a family-specific quirk. |
-| Role | **Run this first.** It's the controlled experiment that validates the core hypothesis (Section 1). | **Run second**, as a generalization/robustness check once Option A's pipeline is validated — reusing the same teacher-labeled queries, just swapping which model answers at each tier. |
+### 4.3 Role Assignment
 
-#### Recommended model assignment (Option A / Qwen)
+Three distinct roles require model assignment and should not be conflated:
+the **candidate pool** (models that actually generate answers, one per
+tier), the **teacher router** (the large model whose routing _decision_ is
+being distilled — its answering ability is not the object of study), and
+the **student router** (the small model being trained to imitate that
+decision).
 
-| Role | Model | Rationale |
-|---|---|---|
-| Candidate — Small | Qwen2.5-1.5B-Instruct (or Qwen3-1.7B) | Cheap, fast, answers the easy majority of queries |
-| Candidate — Medium | Qwen3-8B (or Qwen2.5-14B-Instruct) | Balances cost against materially better reasoning |
-| Candidate — Large | Qwen2.5-72B-Instruct (Qwen2.5-32B as a lower-compute fallback) | Strongest available same-family reasoner; used both as the top answering tier and, per below, doubling as the teacher |
-| **Teacher router** | Qwen2.5-72B-Instruct, prompted (Section 2.4) — same weights as the Large candidate | Reuses the model you're already serving at the top tier instead of standing up a fourth, separate frontier model purely for labeling; keeps the whole pipeline single-family and reproducible without an external API dependency. Trade-off: a model that is simultaneously "the answerer" and "the labeler" for its own tier could be mildly optimistic about when Large is needed — this is why routing labels are grounded empirically (Section 2.4) rather than trusted purely from the LLM's own self-assessment. |
-| **Student router** | Qwen2.5-0.5B or Qwen3-0.6B, fine-tuned as a classifier | The actual deliverable: >100x smaller than the teacher, cheap enough to run on every request before any candidate model is invoked |
+**Table 4. Recommended model assignment under the same-family (Qwen) configuration.**
 
-If budget allows, an Ultra-Small *candidate* (Qwen2.5-0.5B) can also be added
-as a 4th answering tier, giving the router 4 output classes instead of 3 —
-optional, since it roughly doubles oracle-execution cost for a class that
-will absorb only the easiest slice of queries.
+| Role               | Model                                                                                                            | Rationale                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Candidate — Small  | Qwen2.5-1.5B-Instruct (alt.: Qwen3-1.7B)                                                                         | Low cost and latency; expected to correctly answer the majority-easy slice of the query distribution.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Candidate — Medium | Qwen3-8B (alt.: Qwen2.5-14B-Instruct)                                                                            | Intermediate cost/capability point for multi-step reasoning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Candidate — Large  | Qwen2.5-72B-Instruct (Qwen2.5-32B as a lower-compute fallback)                                                   | Strongest available same-family reasoning model; serves simultaneously as the top answering tier and as the teacher (below).                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Teacher router     | Qwen2.5-72B-Instruct, used only for routing prediction (Section 5.2), not as an answering candidate in this role | Reuses a model already deployed at the top serving tier rather than introducing a fourth, external frontier model solely for labeling, preserving single-family provenance and avoiding an external API dependency. This choice carries a trade-off: a model that is simultaneously the top-tier answerer and the routing labeler may be systematically biased toward over-predicting when "Large" is required. This risk is the direct motivation for grounding every predicted label against an independent oracle execution (Section 5.1), rather than trusting the teacher's self-assessment alone. |
+| Student router     | Qwen2.5-0.5B or Qwen3-0.6B, fine-tuned as a tier classifier                                                      | The object of this study: more than two orders of magnitude smaller than the teacher, intended to run ahead of every candidate-model invocation at negligible added latency.                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
-### 2.4 Teacher Labeling Pipeline
+An optional fourth answering tier (Ultra-Small, e.g. Qwen2.5-0.5B) may be
+added to the candidate pool if a substantial fraction of the expected query
+distribution is trivially easy; this roughly doubles oracle-execution cost
+and is treated as an open question (Section 8) rather than a default.
 
-Two things are easy to conflate and must be kept separate:
+## 5. Teacher Supervision Pipeline
 
-- **Oracle ground truth** — derived by *actually running* the query on the
-  Small/Medium/Large candidates and scoring each with the benchmark's own
-  correctness metric (Section 2.1). The ground-truth label is the
-  **cheapest tier that answers correctly** (if several tiers succeed, prefer
-  the smallest/cheapest; if none succeed, label Large — it's the best
-  available option even though it failed).
-- **Teacher-predicted label** — the large LLM's *prediction* of that same
-  label, made from the query text alone, with no access to the oracle
-  executions. This is what the student is actually distilled from, because
-  at inference time neither the teacher nor the student gets to run three
-  candidate models before deciding — that would defeat the entire point of
-  routing.
+A central design decision in this study is the explicit separation of two
+signals that are easy to conflate in a naive implementation: an _oracle_
+label, grounded in actual model executions, and a _predicted_ label,
+elicited from the teacher model without execution. Conflating them —
+training a student purely on the teacher's self-reported prediction, never
+checked against any ground truth — would risk distilling the teacher's
+biases and blind spots without any error-correcting signal, and would leave
+no way to distinguish "the student learned the teacher faithfully" from
+"the teacher's policy was good to begin with." The pipeline below, in
+structure though not in labeling source, follows the precedent set by
+Zooter (Lu et al., 2023), where a reward model's scores over candidate
+outputs are converted into a categorical routing label and distilled into
+a lightweight classifier.
 
-Training a classifier on the LLM's self-reported prediction alone (never
-checked against reality) risks distilling the teacher's biases and
-blind spots with no error correction. Grounding every predicted label
-against an oracle execution — the way the pipeline below does — keeps the
-teacher's calibration honest and gives you a second metric ("teacher
-routing accuracy") to report, distinct from "student fidelity to teacher."
-This mirrors the approach used by prior routing-distillation systems in the
-literature (e.g., Zooter derives categorical routing labels from a reward
-model, then distills that categorical distribution into a small BERT-sized
-classifier via KD — same shape of pipeline, different labeling source).
+### 5.1 Oracle Labeling
 
-#### Teacher prompt design
+For each query in the training pool, the query is executed against every
+candidate tier (Section 4.3), and each response is scored using the
+correctness metric defined for its source benchmark (Section 3). The
+oracle label is assigned as the cheapest tier that answered correctly; if
+multiple tiers succeed, the smallest/cheapest is preferred; if no tier
+succeeds, the label defaults to Large, as the best available option among
+those that were tried, even though it failed. This oracle label constitutes
+ground truth for the purpose of measuring routing _quality_, as distinct
+from routing _fidelity to the teacher_ (Section 7).
+
+### 5.2 Teacher Prediction Protocol
+
+Separately, the teacher model is prompted to predict the routing label from
+the query text alone, without access to any oracle execution — matching
+exactly the information available to the student at inference time. The
+prompt specifies the tier taxonomy, requires a structured JSON output
+carrying both an arg-max label and a full probability distribution over
+tiers, and is calibrated with few-shot examples drawn from the training
+pool, each annotated with its oracle-derived ground-truth label so that the
+teacher's stated confidence is anchored to observed outcomes rather than
+unguided self-assessment.
 
 ```
 SYSTEM:
@@ -237,12 +294,11 @@ Respond with a single JSON object, no other text:
   "probabilities": {"Small": <float>, "Medium": <float>, "Large": <float>},
   "rationale": "<one sentence>"
 }
-The three probabilities must sum to 1.0 and reflect your genuine confidence
-distribution across tiers, not just a one-hot on your chosen label.
+The three probabilities must sum to 1.0 and reflect genuine confidence
+across tiers, not a one-hot encoding of the chosen label.
 
-Few-shot examples (2-3 per tier, drawn from the training pool, each shown
-with its oracle-derived ground-truth label so the teacher's stated
-confidence is calibrated against real outcomes rather than vibes):
+Few-shot examples (2-3 per tier, drawn from the training pool, each paired
+with its oracle-derived ground-truth label):
 <example query> -> <ground-truth label>
 ...
 
@@ -250,116 +306,162 @@ USER:
 <query text>
 ```
 
-The `probabilities` field is the actual distillation target for
-cross-entropy / KL-based soft-label training — not just the arg-max label —
-since it carries more signal about near-boundary cases (e.g., Small: 0.45 /
-Medium: 0.5 / Large: 0.05 tells the student this was a genuinely close call,
-which a one-hot label would erase).
+The `probabilities` field, rather than the arg-max label alone, is the
+primary distillation target (Section 6): it preserves information about
+near-boundary cases — e.g., a distribution of Small: 0.45 / Medium: 0.50 /
+Large: 0.05 signals a genuinely close call that a one-hot label would
+discard entirely.
 
-#### Training record schema
+### 5.3 Training Record Schema
 
-Store one row per query:
+Each query in the training pool is stored as a single record with the
+fields in Table 5.
 
-| Field | Description |
-|---|---|
-| `query` | Raw input text |
-| `dataset_name` | Source benchmark + split (e.g. `gsm8k/train`) |
-| `oracle_label` | Cheapest tier that answered correctly (ground truth) |
-| `oracle_correctness` | Per-tier pass/fail from actually running Small/Medium/Large |
-| `teacher_predicted_label` | Teacher's arg-max label from the prompt above |
-| `teacher_probabilities` | Full soft-label distribution `{Small, Medium, Large}` |
-| `teacher_rationale` | One-line explanation string (for debugging/auditing, not used as a training signal) |
-| `per_tier_latency` | Wall-clock generation latency for each candidate's oracle run |
-| `per_tier_input_tokens` / `per_tier_output_tokens` | Token counts per candidate |
-| `per_tier_inference_cost` | Derived from tokens × published per-tier $/token, or GPU-seconds if self-hosted |
+**Table 5. Per-query training record schema.**
 
-### 2.5 Student Distillation
+| Field                                             | Description                                                                             |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `query`                                           | Raw input text                                                                          |
+| `dataset_name`                                    | Source benchmark and split, e.g. `gsm8k/train`                                          |
+| `oracle_label`                                    | Cheapest tier that answered correctly (ground truth, Section 5.1)                       |
+| `oracle_correctness`                              | Per-tier pass/fail from executing every candidate                                       |
+| `teacher_predicted_label`                         | Teacher's arg-max prediction (Section 5.2)                                              |
+| `teacher_probabilities`                           | Full soft-label distribution over `{Small, Medium, Large}`                              |
+| `teacher_rationale`                               | One-sentence explanation string, retained for auditing, not used as a training signal   |
+| `per_tier_latency`                                | Wall-clock generation latency for each candidate's oracle execution                     |
+| `per_tier_input_tokens`, `per_tier_output_tokens` | Token counts per candidate                                                              |
+| `per_tier_inference_cost`                         | Derived from token counts and published per-tier pricing, or GPU-seconds if self-hosted |
 
-- **Inputs:** `query` text only (exactly what's available at real inference
-  time — no oracle signals, no teacher rationale).
-- **Targets:** primarily `teacher_probabilities` (soft-label KL/
-  cross-entropy against the full distribution); also report metrics against
-  `oracle_label` (hard label) so you can separate "did the student learn the
-  teacher" from "is the teacher's policy actually any good."
-- **Architecture:** fine-tune the ultra-small model with a classification
-  head (or constrained-decoding JSON output, if you'd rather keep it
-  generative for consistency with the teacher's I/O shape) over the 3
-  tier labels.
-- **Loss:** cross-entropy against soft teacher labels (optionally a blended
-  loss: `α · CE(student, teacher_probs) + (1-α) · CE(student, oracle_label)`
-  to prevent the student from inheriting purely the teacher's mistakes).
-- **Logged per training run:** student routing accuracy vs. teacher, student
-  routing accuracy vs. oracle, student inference latency, student parameter
-  count vs. teacher parameter count (the compression ratio being reported).
+## 6. Student Distillation
 
-### 2.6 Evaluation (offline, held-out test splits)
+The student model receives only the raw query text as input — precisely
+the information available at deployment time, excluding any oracle signal
+or teacher rationale. Its primary training target is the teacher's soft
+probability distribution (`teacher_probabilities`), optimized via a
+cross-entropy or KL-divergence objective; its performance against the
+oracle hard label (`oracle_label`) is tracked as a separate metric, so that
+distillation fidelity and routing quality remain distinguishable
+throughout training rather than being collapsed into one number.
 
-| Metric | Definition |
-|---|---|
-| Routing accuracy (vs. teacher) | student label == teacher label, over total queries — measures **distillation fidelity** |
-| Routing accuracy (vs. oracle) | student label == oracle ground-truth label — measures **routing quality**, the metric that actually matters end-to-end |
-| Task accuracy | correctness of the final answer produced by *whichever tier the student routed to*, per the benchmark's own metric (exact-match / F1 / pass@k) — this is the metric a user of the system actually feels |
-| Cost saved | Σ cost of tier the student picked vs. Σ cost if every query went to Large (or vs. teacher's own routing cost, including the teacher's own inference cost) |
-| Latency (routing decision only) | student's own forward-pass latency to emit a routing decision, compared against the teacher's — this is the number that justifies the whole project |
-| Latency (end-to-end) | routing decision latency + the chosen tier's generation latency, vs. always-route-to-Large as a baseline |
+A blended objective is used to prevent the student from purely inheriting
+teacher error:
 
-Report routing accuracy **broken down by dataset and by oracle label**, not
-just as one aggregate number — a router that's 95% accurate but only because
-90% of queries are trivially "Small" is a much weaker result than one that's
-85% accurate with balanced performance across all three labels.
+```
+L = α · CE(student_output, teacher_probabilities) + (1 − α) · CE(student_output, oracle_label)
+```
 
----
+with α tuned as a hyperparameter rather than fixed a priori. The student is
+implemented as a lightweight classification head over the tier labels
+(preferred; see Section 8 for the alternative generative-JSON interface).
+Each training run logs: routing accuracy against the teacher, routing
+accuracy against the oracle, student inference latency, and the
+compression ratio (student parameter count relative to teacher parameter
+count) — this last figure being the headline result the study is designed
+to produce.
 
-## 3. Deployment Phase (Inference)
+## 7. Evaluation Protocol
+
+Evaluation is conducted on held-out splits of each benchmark (Section 3),
+using the metrics in Table 6.
+
+**Table 6. Evaluation metrics.**
+
+| Metric                       | Definition                                                                                                                                                                         |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Routing accuracy vs. teacher | Proportion of queries where the student's label matches the teacher's — measures distillation fidelity.                                                                            |
+| Routing accuracy vs. oracle  | Proportion of queries where the student's label matches the oracle ground-truth label — measures routing quality, the metric of primary practical interest.                        |
+| Task accuracy                | End-task correctness (exact-match / F1 / pass@k, per benchmark) of the response produced by whichever tier the student routed to.                                                  |
+| Cost saved                   | Aggregate cost of the tiers the student selected, relative to a fixed-Large baseline (and relative to the teacher's own routing cost, including the teacher's own inference cost). |
+| Routing latency              | The student's own forward-pass latency to emit a decision, compared against the teacher's — the figure that substantiates the project's central efficiency claim.                  |
+| End-to-end latency           | Routing latency plus the selected tier's generation latency, compared against an always-route-to-Large baseline.                                                                   |
+
+Routing accuracy is reported disaggregated by dataset and by oracle label,
+not only as a single aggregate figure: a router that is 95% accurate purely
+because 90% of evaluation queries are trivially "Small" represents a
+substantially weaker result than one that is 85% accurate with balanced
+performance across all tiers, and aggregate accuracy alone would not
+distinguish the two.
+
+## 8. Deployment Architecture
+
+At inference time, the pipeline is:
 
 ```
 1. Input query arrives
 2. Student router executes  → routing decision (single forward pass,
                                 sub-tier-model latency)
-3. Route to the chosen candidate model tier
-4. Candidate model generates the response
-5. Log: task correctness (if verifiable), end-to-end latency, cost
-        — feed back into monitoring / periodic re-distillation
+3. Query is routed to the selected candidate tier
+4. The candidate model generates the response
+5. Task correctness (where verifiable), end-to-end latency, and cost
+   are logged, feeding monitoring and periodic re-distillation
 ```
 
-Step 5 matters operationally: routing policies drift as the underlying
-candidate models are upgraded, so the deployment loop should periodically
-re-run a slice of live (or replayed) traffic through the oracle pipeline
-and check the student hasn't drifted from what oracle-optimal routing now
-looks like.
+Step 5 is operationally significant: as candidate models are upgraded or
+replaced, the oracle-optimal routing policy shifts under the student, which
+was trained against a now-outdated teacher/oracle pairing. The deployment
+loop should therefore periodically re-run a sample of live or replayed
+traffic through the oracle-labeling procedure (Section 5.1) and check for
+drift between the deployed student's decisions and current oracle-optimal
+routing.
 
----
+## 9. Open Questions
 
-## 4. Open Follow-ups (not yet decided — flag before implementation)
+Several design decisions are deliberately left open pending further
+experimentation rather than assumed by default:
 
-- **Exact JSON-vs-classifier-head interface for the student** — generative
-  JSON keeps I/O symmetric with the teacher (easier to compare probability
-  distributions apples-to-apples) but a plain classification head is faster
-  and removes decode-time variance; pick classification head unless you have
-  a specific reason to keep the student generative.
-- **Whether to add a 4th "Ultra-Small" answering tier** to the candidate
-  pool (see Section 2.3) — increases oracle-labeling cost, only worth it if
-  a large fraction of your query mix is genuinely trivial.
-- **Cross-family run (Option B)** — timebox it as a follow-up once Option A
-  is validated; don't build both in parallel.
+1. **Student output interface.** A generative JSON interface preserves
+   symmetry with the teacher's I/O format, simplifying direct comparison of
+   probability distributions, but introduces decode-time latency variance
+   that a fixed classification head avoids. A classification head is
+   recommended unless a specific downstream requirement favors the
+   generative format.
+2. **Fourth answering tier.** Whether to add an Ultra-Small candidate to the
+   answering pool (Section 4.3) depends on what fraction of the deployed
+   query distribution is genuinely trivial; this should be assessed
+   empirically before committing the additional oracle-execution cost.
+3. **Cross-family generalization run.** The cross-family configuration
+   (Table 3) should be time-boxed as a follow-up study once the same-family
+   configuration has validated the core hypothesis, rather than pursued in
+   parallel with it.
 
----
+## References
 
-### Sources consulted
+Austin, J., Odena, A., Nye, M., Bosma, M., Michalewski, H., Dohan, D., Jiang,
+E., Cai, C., Terry, M., Le, Q., & Sutton, C. (2021). Program Synthesis with
+Large Language Models. _arXiv:2108.07732_.
 
-- [openai/gsm8k](https://huggingface.co/datasets/openai/gsm8k)
-- [hendrycks-MATH-benchmark](https://huggingface.co/datasets/nlile/hendrycks-MATH-benchmark)
-- [mandarjoshi/trivia_qa](https://huggingface.co/datasets/mandarjoshi/trivia_qa)
-- [hotpotqa/hotpot_qa](https://huggingface.co/datasets/hotpotqa/hotpot_qa)
-- [openai/openai_humaneval](https://huggingface.co/datasets/openai/openai_humaneval)
-- [google-research/mbpp](https://github.com/google-research/google-research/tree/master/mbpp)
-- [Qwen2.5 Technical Report](https://arxiv.org/pdf/2412.15115) / [Qwen2.5 collection](https://huggingface.co/collections/Qwen/qwen25)
-- [Qwen3 blog](https://qwenlm.github.io/blog/qwen3/) / [Qwen3 Technical Report](https://arxiv.org/pdf/2505.09388)
-- [Gemma 3 launch (Hugging Face blog)](https://huggingface.co/blog/gemma3) / [google/gemma-3-270m](https://huggingface.co/google/gemma-3-270m)
-- [Gemma 2 launch (Google blog)](https://blog.google/innovation-and-ai/technology/developers-tools/google-gemma-2/)
-- [Gemma 4 launch (Google blog)](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/)
-- [Llama 3.2 (AWS Bedrock announcement)](https://aws.amazon.com/blogs/aws/introducing-llama-3-2-models-from-meta-in-amazon-bedrock-a-new-generation-of-multimodal-vision-and-lightweight-models/) / [Llama 3.1 (Hugging Face blog)](https://huggingface.co/blog/llama31)
-- [Phi-3 Technical Report](https://arxiv.org/pdf/2404.14219) / [Phi-4 Technical Report](https://www.microsoft.com/en-us/research/wp-content/uploads/2024/12/P4TechReport.pdf)
-- [ROUTERBENCH](https://arxiv.org/pdf/2403.12031) — multi-LLM routing benchmark, precomputed inference outcomes
-- [Awesome-Routing-LLMs](https://github.com/MilkThink-Lab/Awesome-Routing-LLMs) — includes Zooter (reward-guided categorical routing label + KD into a small classifier), the closest prior-art shape to this design
-- [Minerva/MATH evaluation harness (lm-evaluation-harness)](https://github.com/EleutherAI/lm-evaluation-harness/blob/main/lm_eval/tasks/minerva_math/README.md)
+Chen, M., Tworek, J., Jun, H., et al. (2021). Evaluating Large Language
+Models Trained on Code. _arXiv:2107.03374_.
+
+Cobbe, K., Kosaraju, V., Bavarian, M., et al. (2021). Training Verifiers to
+Solve Math Word Problems. _arXiv:2110.14168_.
+
+Hendrycks, D., Burns, C., Kadavath, S., Arora, A., Basart, S., Tang, E.,
+Song, D., & Steinhardt, J. (2021). Measuring Mathematical Problem Solving
+With the MATH Dataset. _arXiv:2103.03874_.
+
+Hu, Q. J., Bieker, J., Li, X., et al. (2024). ROUTERBENCH: A Benchmark for
+Multi-LLM Routing System. _arXiv:2403.12031_.
+
+Joshi, M., Choi, E., Weld, D. S., & Zettlemoyer, L. (2017). TriviaQA: A
+Large Scale Distantly Supervised Challenge Dataset for Reading
+Comprehension. _arXiv:1705.03551_.
+
+Lu, K., Yuan, H., Lin, R., Lin, J., Yuan, Z., Zhou, C., & Zhou, J. (2023).
+Routing to the Expert: Efficient Reward-guided Ensemble of Large Language
+Models. _arXiv:2311.08692_. (NAACL 2024.)
+
+Ong, I., Almahairi, A., Wu, V., Chiang, W.-L., Wu, T., Gonzalez, J. E.,
+Kadous, M. W., & Stoica, I. (2024). RouteLLM: Learning to Route LLMs with
+Preference Data. _arXiv:2406.18665_.
+
+Yang, Z., Qi, P., Zhang, S., Bengio, Y., Cohen, W. W., Salakhutdinov, R., &
+Manning, C. D. (2018). HotpotQA: A Dataset for Diverse, Explainable
+Multi-hop Question Answering. _arXiv:1809.09600_.
+
+Model and dataset facts not otherwise cited above are drawn directly from
+each model family's official release material (Qwen2.5 and Qwen3 technical
+reports and Hugging Face collections; the Gemma 2, Gemma 3, and Gemma 4
+release announcements; the Llama 3.1 and 3.2 release material; and the
+Phi-3 and Phi-4 technical reports) and from the official dataset cards for
+GSM8K, MATH, TriviaQA, HotpotQA, HumanEval, and MBPP.
