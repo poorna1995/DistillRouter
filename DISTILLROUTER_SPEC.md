@@ -183,18 +183,6 @@ cross-checked against each family's official release material.
 | Medium      | 7B–14B          | Qwen3-8B, Qwen2.5-14B, Gemma 2 9B, Gemma 3 12B, Phi-3-Small (7B), Phi-3-Medium / Phi-4 (14B)   |
 | Large       | 30B–72B         | Qwen2.5-32B, Qwen2.5-72B, Llama 3.1-70B                                                        |
 
-Two corrections to an earlier draft of this taxonomy are noted for the
-record. First, a fourth-generation Gemma release ("Gemma 4") exists as of
-this writing (April 2026), but its size configuration — 2.3B/4.5B
-effective-parameter models using per-layer embeddings, a 12B dense
-multimodal model, a 26B mixture-of-experts model activating 3.8B parameters
-per token, and a 31B dense model — does not map cleanly onto the tier
-boundaries used here, and its tooling and evaluation-harness support remain
-comparatively immature soon after release; Gemma 3 (270M/1B/4B/12B/27B) is
-used instead for reproducibility. Second, Gemma 2 was released only at 9B
-and 27B; the "Gemma 2 9B" and "Gemma 3 12B" entries in Table 2 both remain
-distinct, correct models rather than duplicate references to the same one.
-
 ### 4.2 Family Selection
 
 Two configurations are considered: models drawn from a single family
@@ -226,11 +214,6 @@ decision).
 | Candidate — Large  | Qwen2.5-72B-Instruct (Qwen2.5-32B as a lower-compute fallback)                                                   | Strongest available same-family reasoning model; serves simultaneously as the top answering tier and as the teacher (below).                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Teacher router     | Qwen2.5-72B-Instruct, used only for routing prediction (Section 5.2), not as an answering candidate in this role | Reuses a model already deployed at the top serving tier rather than introducing a fourth, external frontier model solely for labeling, preserving single-family provenance and avoiding an external API dependency. This choice carries a trade-off: a model that is simultaneously the top-tier answerer and the routing labeler may be systematically biased toward over-predicting when "Large" is required. This risk is the direct motivation for grounding every predicted label against an independent oracle execution (Section 5.1), rather than trusting the teacher's self-assessment alone. |
 | Student router     | Qwen2.5-0.5B or Qwen3-0.6B, fine-tuned as a tier classifier                                                      | The object of this study: more than two orders of magnitude smaller than the teacher, intended to run ahead of every candidate-model invocation at negligible added latency.                                                                                                                                                                                                                                                                                                                                                                                                                            |
-
-An optional fourth answering tier (Ultra-Small, e.g. Qwen2.5-0.5B) may be
-added to the candidate pool if a substantial fraction of the expected query
-distribution is trivially easy; this roughly doubles oracle-execution cost
-and is treated as an open question (Section 8) rather than a default.
 
 ## 5. Teacher Supervision Pipeline
 
@@ -344,20 +327,7 @@ distillation fidelity and routing quality remain distinguishable
 throughout training rather than being collapsed into one number.
 
 A blended objective is used to prevent the student from purely inheriting
-teacher error:
-
-```
-L = α · CE(student_output, teacher_probabilities) + (1 − α) · CE(student_output, oracle_label)
-```
-
-with α tuned as a hyperparameter rather than fixed a priori. The student is
-implemented as a lightweight classification head over the tier labels
-(preferred; see Section 8 for the alternative generative-JSON interface).
-Each training run logs: routing accuracy against the teacher, routing
-accuracy against the oracle, student inference latency, and the
-compression ratio (student parameter count relative to teacher parameter
-count) — this last figure being the headline result the study is designed
-to produce.
+\
 
 ## 7. Evaluation Protocol
 
@@ -423,45 +393,3 @@ experimentation rather than assumed by default:
    (Table 3) should be time-boxed as a follow-up study once the same-family
    configuration has validated the core hypothesis, rather than pursued in
    parallel with it.
-
-## References
-
-Austin, J., Odena, A., Nye, M., Bosma, M., Michalewski, H., Dohan, D., Jiang,
-E., Cai, C., Terry, M., Le, Q., & Sutton, C. (2021). Program Synthesis with
-Large Language Models. _arXiv:2108.07732_.
-
-Chen, M., Tworek, J., Jun, H., et al. (2021). Evaluating Large Language
-Models Trained on Code. _arXiv:2107.03374_.
-
-Cobbe, K., Kosaraju, V., Bavarian, M., et al. (2021). Training Verifiers to
-Solve Math Word Problems. _arXiv:2110.14168_.
-
-Hendrycks, D., Burns, C., Kadavath, S., Arora, A., Basart, S., Tang, E.,
-Song, D., & Steinhardt, J. (2021). Measuring Mathematical Problem Solving
-With the MATH Dataset. _arXiv:2103.03874_.
-
-Hu, Q. J., Bieker, J., Li, X., et al. (2024). ROUTERBENCH: A Benchmark for
-Multi-LLM Routing System. _arXiv:2403.12031_.
-
-Joshi, M., Choi, E., Weld, D. S., & Zettlemoyer, L. (2017). TriviaQA: A
-Large Scale Distantly Supervised Challenge Dataset for Reading
-Comprehension. _arXiv:1705.03551_.
-
-Lu, K., Yuan, H., Lin, R., Lin, J., Yuan, Z., Zhou, C., & Zhou, J. (2023).
-Routing to the Expert: Efficient Reward-guided Ensemble of Large Language
-Models. _arXiv:2311.08692_. (NAACL 2024.)
-
-Ong, I., Almahairi, A., Wu, V., Chiang, W.-L., Wu, T., Gonzalez, J. E.,
-Kadous, M. W., & Stoica, I. (2024). RouteLLM: Learning to Route LLMs with
-Preference Data. _arXiv:2406.18665_.
-
-Yang, Z., Qi, P., Zhang, S., Bengio, Y., Cohen, W. W., Salakhutdinov, R., &
-Manning, C. D. (2018). HotpotQA: A Dataset for Diverse, Explainable
-Multi-hop Question Answering. _arXiv:1809.09600_.
-
-Model and dataset facts not otherwise cited above are drawn directly from
-each model family's official release material (Qwen2.5 and Qwen3 technical
-reports and Hugging Face collections; the Gemma 2, Gemma 3, and Gemma 4
-release announcements; the Llama 3.1 and 3.2 release material; and the
-Phi-3 and Phi-4 technical reports) and from the official dataset cards for
-GSM8K, MATH, TriviaQA, HotpotQA, HumanEval, and MBPP.
