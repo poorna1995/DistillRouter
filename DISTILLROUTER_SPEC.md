@@ -1,41 +1,5 @@
 # DistillRouter: Distilling a Large Language Model Routing Policy into a Lightweight Student Router
 
-**Working design document — v3**
-**Last revised:** 2026-08-07
-
-## Abstract
-
-Model-routing systems for multi-tier LLM serving use a large model, or a large
-dedicated router, to decide which downstream model should answer an incoming
-query. This routing step is placed on the critical path of every request,
-so its own inference cost and latency are added to the cost and latency of
-the model it eventually selects. We propose DistillRouter, a study of
-whether the routing policy of a large _teacher router_ can be distilled into
-a substantially smaller _student router_ without a material loss in routing
-quality. We formulate routing as a discrete tier-classification problem
-supervised jointly by (i) an empirical oracle signal, obtained by executing
-each candidate tier and scoring it against task-specific correctness
-metrics, and (ii) a soft label distribution elicited from a large language
-model prompted to predict the oracle outcome from the query text alone. This
-document specifies the benchmark suite, the model family and tier selection,
-the teacher-labeling protocol, the student training objective, and the
-evaluation methodology used to test this hypothesis.
-
-## 1. Introduction
-
-### 1.1 Motivation
-
-Production systems that serve multiple LLMs of varying capacity and cost
-face a routing problem: for each incoming query, decide which model should
-generate the response, trading off answer quality against latency and
-inference cost. A common architecture places a large, capable model at this
-decision point, since the routing decision itself benefits from the same
-reasoning capacity needed to judge query difficulty (Ong et al., 2024; Lu et
-al., 2023). This is effective but self-defeating in latency terms: the
-router now contributes a large model's forward-pass latency to _every_
-request, including the large share of requests that a much smaller model
-could have answered correctly on its own.
-
 ### 1.2 Problem Statement
 
 Can the routing policy learned by a large language model be compressed into
