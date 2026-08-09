@@ -26,12 +26,12 @@ without re-checking that assumption.
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from datasets import load_dataset
 
 from dataset.base import BaseDatasetLoader, register
 from common.schema import Example
+from common.scoring import extract_boxed_answer, extract_candidate_answer, register_scorer
 
 _SUBJECTS = (
     "algebra",
@@ -44,31 +44,31 @@ _SUBJECTS = (
 )
 
 
-def _extract_boxed(solution: str) -> Optional[str]:
-    """Return the content of the final \\boxed{...} in a MATH solution.
+@register_scorer("math")
+def _score(candidate_answer_text: str, reference_answer: str) -> bool:
+    """Exact-match on the final answer extracted via
+    `common.scoring.extract_candidate_answer` (distinct from
+    `extract_boxed_answer` below, which parses MATH's own *reference*
+    solutions, not candidate output), with light string normalization
+    (whitespace, spacing LaTeX commands, outer $/.).
 
-    Braces can nest (e.g. \\boxed{\\frac{1}{2}}), so this is a small
-    brace-matching scan rather than a naive regex.
+    Known gap: this does not attempt deeper symbolic equivalence (e.g.
+    "0.5" vs "\\frac{1}{2}", or algebraically-equal-but-differently-
+    written expressions) — a candidate that reaches an equivalent but
+    differently-formatted answer will be scored incorrect. Acceptable for
+    a first pass; flagged rather than silently assumed solved.
     """
-    key = "\\boxed"
-    start = solution.rfind(key)
-    if start == -1:
-        return None
-    i = start + len(key)
-    while i < len(solution) and solution[i] != "{":
-        i += 1
-    if i >= len(solution):
-        return None
-    depth = 0
-    content_start = i
-    for j in range(i, len(solution)):
-        if solution[j] == "{":
-            depth += 1
-        elif solution[j] == "}":
-            depth -= 1
-            if depth == 0:
-                return solution[content_start + 1 : j]
-    return None  # unbalanced braces; leave for manual inspection
+    extracted = extract_candidate_answer(candidate_answer_text)
+    if extracted is None:
+        return False
+    return _normalize(extracted) == _normalize(reference_answer)
+
+
+def _normalize(text: str) -> str:
+    normalized = text.strip()
+    for token in (" ", "\\!", "\\,", "\\;", "\\left", "\\right"):
+        normalized = normalized.replace(token, "")
+    return normalized.strip("$").rstrip(".")
 
 
 @register
@@ -98,7 +98,7 @@ class MATHLoader(BaseDatasetLoader):
         with raw_path.open(encoding="utf-8") as f:
             for i, line in enumerate(f):
                 row = json.loads(line)
-                answer = _extract_boxed(row["solution"])
+                answer = extract_boxed_answer(row["solution"])
                 if answer is None:
                     skipped += 1
                     continue

@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Optional
 
 from datasets import load_dataset
 
 from dataset.base import BaseDatasetLoader, register
 from common.schema import Example
+from common.scoring import extract_candidate_answer, register_scorer
 
 _ANSWER_DELIM_RE = re.compile(r"####\s*(.+)")
 
@@ -22,6 +24,30 @@ def _extract_final_answer(solution: str) -> str:
     """GSM8K reference solutions end with a line '#### <final answer>'."""
     match = _ANSWER_DELIM_RE.search(solution)
     return match.group(1).strip() if match else solution.strip()
+
+
+@register_scorer("gsm8k")
+def _score(candidate_answer_text: str, reference_answer: str) -> bool:
+    """Exact-match on the final numeric answer, extracted via
+    `common.scoring.extract_candidate_answer` (not GSM8K's own native
+    "#### X" format, which only appears in the *reference* solution text,
+    never in candidate output).
+    """
+    extracted = extract_candidate_answer(candidate_answer_text)
+    if extracted is None:
+        return False
+    candidate_number = _normalize_number(extracted)
+    reference_number = _normalize_number(reference_answer)
+    return candidate_number is not None and candidate_number == reference_number
+
+
+def _normalize_number(text: str) -> Optional[str]:
+    cleaned = text.strip().replace(",", "").replace("$", "")
+    try:
+        value = float(cleaned)
+    except ValueError:
+        return None
+    return str(int(value)) if value == int(value) else str(value)
 
 
 @register
