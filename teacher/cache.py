@@ -1,17 +1,7 @@
-"""Incremental cache for teacher labels.
-
-This is what makes `label-data` idempotent: rerunning it only pays for
-queries that are new or whose `prompt_version` changed, instead of
-re-calling the teacher for every query every time — mirroring how
-`dataset/base.py` skips re-downloading raw data already on disk.
-
-Layout: one cache file per dataset split, `data/teacher/<dataset>/<split>.jsonl`.
-Labels are appended as they're produced (not batched at the end), so an
-interrupted run loses at most the one label in flight.
-
-A thin specialization of `common.cache.JsonlRecordCache` — see there for
-the actual caching mechanism, shared with `oracle/cache.py`.
-"""
+"""Incremental cache for teacher labels — makes label-data idempotent.
+One file per (dataset, split), and per output_version when the teacher
+sets one: data/teacher/<dataset>/[<output_version>/]<split>.jsonl — the
+path itself is decided by teacher/labeler.py, not by this class."""
 from __future__ import annotations
 
 from pathlib import Path

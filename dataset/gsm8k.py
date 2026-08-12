@@ -1,9 +1,6 @@
 """GSM8K loader — grade-school arithmetic word problems (Cobbe et al., 2021).
-
-Source: https://huggingface.co/datasets/openai/gsm8k
-Native splits: train (7,473) / test (1,319) — verified directly against the
-source at implementation time. No validation split is shipped upstream, so
-`BaseDatasetLoader` carves one out of train (see base.py).
+Source: huggingface.co/datasets/openai/gsm8k. Native splits: train (7,473)
+/ test (1,319); no validation split, carved from train by base.py.
 """
 from __future__ import annotations
 
@@ -28,11 +25,7 @@ def _extract_final_answer(solution: str) -> str:
 
 @register_scorer("gsm8k")
 def _score(candidate_answer_text: str, reference_answer: str) -> bool:
-    """Exact-match on the final numeric answer, extracted via
-    `common.scoring.extract_candidate_answer` (not GSM8K's own native
-    "#### X" format, which only appears in the *reference* solution text,
-    never in candidate output).
-    """
+    """Exact-match on the final numeric answer."""
     extracted = extract_candidate_answer(candidate_answer_text)
     if extracted is None:
         return False

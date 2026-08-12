@@ -1,21 +1,18 @@
 """Teacher labeling pipeline.
 
-- `base.py`         — TeacherModel ABC + registry (mirrors dataset/base.py's pattern).
-- `heuristic.py`    — HeuristicTeacher, a zero-cost deterministic baseline that
-                       exercises the pipeline without any model calls.
-- `qwen_teacher.py` — QwenTeacher, Qwen2.5-3B prompted (few-shot, calibrated
-                       against real oracle.labeler.py ground truth) to predict
-                       a routing label + soft distribution from query text
-                       alone. See DISTILLROUTER_SPEC.md's "Teacher Model"
-                       section and qwen_teacher.py's module docstring.
-- `cache.py`        — TeacherLabelCache: makes labeling idempotent/incremental,
-                       keyed on (query_id, prompt_version).
-- `labeler.py`      — label_dataset(): read -> cache-check -> dedupe -> predict -> cache.
+- base.py           — TeacherModel ABC + registry.
+- qwen_teacher_v1.py — QwenTeacherV1 ("qwen2.5-3b-v1"), few-shot, label-only.
+                       Output: data/teacher/<dataset>/v1/<split>.jsonl.
+- qwen_teacher_v2.py — QwenTeacherV2 ("qwen2.5-3b-v2"), few-shot, label + reasoning.
+                       Output: data/teacher/<dataset>/v2/<split>.jsonl.
+- fewshot.py        — shared few-shot loading, prompts, parsing, self-referential guard.
+- cache.py          — TeacherLabelCache, keyed on (query_id, prompt_version).
+- labeler.py        — label_dataset(): read -> cache-check -> dedupe -> predict -> cache.
 
-Oracle labeling itself (executing each candidate tier to score against
-ground truth) lives in oracle/, not here — teacher/ only consumes its
-output (oracle/labeler.py's calibration labels).
+Both registered teachers require real oracle-labeled calibration data to
+instantiate (see oracle/labeler.py) — there is no blind (no-few-shot)
+variant. Oracle labeling itself lives in oracle/, not here.
 """
 from teacher.base import available_teachers, get_teacher_class  # noqa: F401
 
-from teacher import heuristic, qwen_teacher  # noqa: F401,E402
+from teacher import qwen_teacher_v1, qwen_teacher_v2  # noqa: F401,E402

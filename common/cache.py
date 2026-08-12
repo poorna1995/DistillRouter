@@ -1,11 +1,5 @@
-"""Generic incremental JSONL cache.
-
-New records are appended to disk immediately, keyed by a caller-supplied
-key function, so a rerun only recomputes whatever isn't already cached.
-`teacher/cache.py`'s `TeacherLabelCache` and `oracle/cache.py`'s
-`OracleAttemptCache` are both thin, one-line specializations of this —
-same caching mechanism, different record type and key.
-"""
+"""Generic incremental JSONL cache, keyed by a caller-supplied key
+function. New records are appended to disk immediately."""
 from __future__ import annotations
 
 import json
@@ -32,7 +26,7 @@ class JsonlRecordCache(Generic[T]):
         return self._records_by_key.get(key)
 
     def add(self, record: T) -> None:
-        """Record a new value and append it to disk immediately."""
+        """Store a record; append to disk if it's new."""
         key = self.key_fn(record)
         already_persisted = key in self._records_by_key
         self._records_by_key[key] = record
@@ -40,8 +34,6 @@ class JsonlRecordCache(Generic[T]):
             self._append_to_disk(record)
 
     def _append_to_disk(self, record: T) -> None:
-        # write_jsonl truncates, so on first write we recreate the file
-        # (empty cache -> just this record); afterwards we append a line.
         if not self.path.exists():
             write_jsonl(self.path, [record])
             return

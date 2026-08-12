@@ -1,27 +1,11 @@
 """MATH loader — competition mathematics problems (Hendrycks et al., 2021).
+Source: huggingface.co/datasets/EleutherAI/hendrycks_math (7 subject
+configs, reproduces the 7,500 train / 5,000 test split). No validation
+split, carved from train by base.py.
 
-Source: https://huggingface.co/datasets/EleutherAI/hendrycks_math — the
-canonical per-subject mirror that reproduces the original paper's 7,500
-train / 5,000 test split.
-
-Note: the mirror originally referenced during design (`nlile/hendrycks-
-MATH-benchmark`) turned out, on inspection, to have been re-split by its
-uploader into 12,000/500 and does NOT match the literature split sizes
-cited in this project's design spec. `EleutherAI/hendrycks_math` was
-verified at implementation time to reproduce 7,500/5,000 exactly, summed
-across its 7 subject-specific configs, and is used instead.
-
-Native splits: train (7,500) / test (5,000). No validation split is
-shipped upstream, so `BaseDatasetLoader` carves one out of train (see
-base.py).
-
-Note on this file's name: it shadows the stdlib `math` module by leaf name.
-This is safe as-is because nothing on sys.path ever points *inside*
-`dataset/` (only the project root is added — see run.py), so `import math`
-anywhere else in the project still resolves to the stdlib; this module is
-only reachable as the fully-qualified `dataset.math`. Do not add `dataset/`
-itself to sys.path, or add a bare `import math` inside this package,
-without re-checking that assumption.
+Note: this module's name shadows stdlib `math` by leaf name. Safe as-is
+since only the project root is on sys.path, not dataset/ itself — don't
+add dataset/ to sys.path without re-checking that.
 """
 from __future__ import annotations
 
@@ -46,18 +30,9 @@ _SUBJECTS = (
 
 @register_scorer("math")
 def _score(candidate_answer_text: str, reference_answer: str) -> bool:
-    """Exact-match on the final answer extracted via
-    `common.scoring.extract_candidate_answer` (distinct from
-    `extract_boxed_answer` below, which parses MATH's own *reference*
-    solutions, not candidate output), with light string normalization
-    (whitespace, spacing LaTeX commands, outer $/.).
-
-    Known gap: this does not attempt deeper symbolic equivalence (e.g.
-    "0.5" vs "\\frac{1}{2}", or algebraically-equal-but-differently-
-    written expressions) — a candidate that reaches an equivalent but
-    differently-formatted answer will be scored incorrect. Acceptable for
-    a first pass; flagged rather than silently assumed solved.
-    """
+    """Exact-match on the extracted final answer, after light LaTeX
+    normalization. Known gap: no symbolic-equivalence check (e.g. "0.5"
+    vs "\\frac{1}{2}" scores incorrect)."""
     extracted = extract_candidate_answer(candidate_answer_text)
     if extracted is None:
         return False

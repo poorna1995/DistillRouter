@@ -1,4 +1,3 @@
-"""Oracle labeling: ground-truth routing labels from actually executing
-candidate models. See oracle/labeler.py and DISTILLROUTER_SPEC.md's
-"Oracle Labeling" section (5.1).
-"""
+"""Oracle labeling — deterministic ground truth, no model judgment
+involved. Executes real candidate models and scores their output; see
+oracle/labeler.py."""

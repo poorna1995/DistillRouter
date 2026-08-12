@@ -1,12 +1,5 @@
-"""Shared local Hugging Face causal-LM loading + chat generation.
-
-Used by candidate/base.py's HuggingFaceCandidate and
-teacher/qwen_teacher.py's QwenTeacher — both load a model once onto GPU,
-then repeatedly send it a chat-templated prompt and decode the newly
-generated tokens. Factored out here so a fix to one (e.g. a CPU fallback,
-or a decode/truncation change) doesn't have to be separately applied to
-both call sites and risk drifting out of sync.
-"""
+"""Shared HF causal-LM loading + chat generation. Used by
+candidate/base.py and both teacher/qwen_teacher_v*.py."""
 from __future__ import annotations
 
 import time

@@ -1,12 +1,6 @@
-"""Base class and registry for dataset loaders.
-
-Adding a new dataset to the project (TriviaQA, HotpotQA, HumanEval, MBPP, ...)
-means writing one new loader module in this package with a
-`BaseDatasetLoader` subclass decorated with `@register` — nothing else in
-the project (run.py, the CLI, downstream teacher/student code) has to
-change. This is the scalability mechanism the whole `datasets/` package is
-built around: new datasets are additive, never require editing existing
-loaders or the entry point.
+"""Base class and registry for dataset loaders. Add a dataset by writing
+a BaseDatasetLoader subclass decorated with @register — nothing else
+changes.
 """
 from __future__ import annotations
 
@@ -27,6 +21,7 @@ from common.config import (
     RAW_DIR,
 )
 from common.schema import Example, write_jsonl
+from common.split_integrity import check_dataset_splits
 
 _REGISTRY: Dict[str, Type["BaseDatasetLoader"]] = {}
 
@@ -44,52 +39,42 @@ def get_loader_class(name: str) -> Type["BaseDatasetLoader"]:
     return _REGISTRY[name]
 
 
-def available_datasets() -> list[str]:
+def datasets() -> list[str]:
     return sorted(_REGISTRY)
 
 
 class BaseDatasetLoader(ABC):
-    """One subclass = one benchmark dataset, normalized to `schema.Example`.
-
-    Subclasses implement only `download()` and `load_native_split()`.
-    Everything that should behave identically across every dataset in the
-    project — carving a validation split out of train when the source
-    doesn't ship one, writing processed JSONL, canonical split naming — is
-    handled once, here.
-    """
+    """One subclass = one benchmark dataset, normalized to schema.Example.
+    Subclasses implement only download() and load_native_split(); split
+    carving, capping, and writing are handled here."""
 
     name: str                                    # registry key, e.g. "gsm8k"
     domain: str                                   # e.g. "math", "knowledge", "code"
-    native_splits: tuple[str, ...]                # splits as the *source* provides them
-    val_fraction: float = DEFAULT_VAL_FRACTION     # only used if source has no "validation" split
+    native_splits: tuple[str, ...]                # splits as the source provides them
+    val_fraction: float = DEFAULT_VAL_FRACTION     # used only if source has no "validation" split
     seed: int = DEFAULT_SEED
     sample_size_caps: Dict[str, Optional[int]] = DEFAULT_SAMPLE_SIZE_CAPS  # per-split cap; None = uncapped
-    calibration_size: int = DEFAULT_CALIBRATION_SIZE  # rows carved out of train for teacher few-shot examples
+    calibration_size: int = DEFAULT_CALIBRATION_SIZE  # rows carved from train for teacher few-shot
 
     def __init__(self, raw_dir: Path = RAW_DIR, processed_dir: Path = PROCESSED_DIR) -> None:
         self.raw_dir = raw_dir / self.name
         self.processed_dir = processed_dir / self.name
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.processed_dir.mkdir(parents=True, exist_ok=True)
-        # Copied, not aliased: `sample_size_caps` looks like a per-instance
-        # dict, so mutating one entry (self.sample_size_caps["train"] = ...)
-        # is a natural thing to try — without this copy, that would mutate
-        # the single shared DEFAULT_SAMPLE_SIZE_CAPS object every loader
-        # that didn't override the class attribute is still pointing at.
-        self.sample_size_caps = dict(self.sample_size_caps)
+        self.sample_size_caps = dict(self.sample_size_caps)  # copy: avoid mutating the shared class default
 
     @abstractmethod
     def download(self) -> None:
-        """Fetch/cache raw source data into `self.raw_dir`, if not already present."""
+        """Fetch/cache raw source data into self.raw_dir, if not already present."""
 
     @abstractmethod
     def load_native_split(self, split: str) -> list[Example]:
-        """Return standardized Examples for one *native* split (as named by the source)."""
+        """Return standardized Examples for one native split (as named by the source)."""
 
     def prepare(self) -> dict[str, int]:
-        """Run the full raw -> processed pipeline for this dataset.
-
-        Returns a {split_name: example_count} summary for logging.
+        """Run raw -> processed for this dataset. Returns {split: count}.
+        Ends with an automated disjointness check (common/split_integrity.py);
+        raises SplitLeakageError, uncaught, if it fails.
         """
         self.download()
         native = {split: self.load_native_split(split) for split in self.native_splits}
@@ -103,17 +88,12 @@ class BaseDatasetLoader(ABC):
             counts[split] = len(examples)
 
         self._write_sample_manifest({**cap_report, **calibration_report})
+        check_dataset_splits(self.name)
         return counts
 
     def _to_canonical_splits(self, native: dict[str, list[Example]]) -> dict[str, list[Example]]:
-        """Map native splits onto the project's canonical train/validation/test.
-
-        Most datasets added so far (GSM8K, MATH) ship only train/test — a
-        validation slice is deterministically carved out of train so every
-        dataset produces the same three canonical files downstream code can
-        rely on without special-casing. Datasets that already ship a native
-        validation split (e.g. future additions like TriviaQA/HotpotQA)
-        pass through unchanged.
+        """Map native splits onto train/validation/test. If the source has
+        no validation split, carve one from train (seeded, deterministic).
         """
         if "validation" in native:
             return native
@@ -125,12 +105,9 @@ class BaseDatasetLoader(ABC):
         n_val = int(len(train) * self.val_fraction)
         val_ids = set(indices[:n_val])
 
-        # `Example.id` intentionally keeps its original "...-train-<i>" form
-        # even after being carved into validation — ids are the stable
-        # cache key every downstream cache (TeacherLabelCache,
-        # OracleAttemptCache) is keyed on, and must stay put regardless of
-        # which split a row ends up in. `Example.split` is not an id,
-        # though, and must reflect where the row actually landed.
+        # Example.id keeps its original "...-train-<i>" form even after
+        # being carved into validation — ids are the cache key downstream
+        # caches are keyed on. Example.split is updated to match reality.
         new_train, validation = [], []
         for i, ex in enumerate(train):
             if i in val_ids:
@@ -146,27 +123,11 @@ class BaseDatasetLoader(ABC):
     def _carve_calibration_split(
         self, canonical: dict[str, list[Example]]
     ) -> tuple[dict[str, list[Example]], dict]:
-        """Carve `calibration_size` rows out of train into their own `calibration`
-        split, before train is capped for distillation and before any other
-        split-level sampling happens.
-
-        These rows will supply the teacher's few-shot demonstration
-        examples once oracle labeling exists (teacher/base.py) — carved
-        out, not merely sampled, so they are structurally disjoint from the
-        train rows that later become distillation targets. Since they only
-        ever come from train, they never overlap validation/test either —
-        no separate leakage check needed elsewhere.
-
-        Must run before `_cap_split_sizes`, so train-capping draws from
-        what's left after this carve-out rather than competing with it for
-        the same rows.
-
-        A `calibration.jsonl` file is always written, even when
-        calibration_size is 0 or larger than train itself (an empty list,
-        in that case) — so a downstream reader (oracle-label, QwenTeacher's
-        few-shot loader) always finds the file and can raise its own clear
-        "no calibration examples" error, rather than hitting a raw
-        FileNotFoundError from a file that silently never got created.
+        """Carve calibration_size rows out of train into a `calibration`
+        split — source of the teacher's few-shot demos. Runs before
+        _cap_split_sizes so capping draws from what's left. Always writes
+        a calibration.jsonl, even empty, so downstream readers get a clear
+        error instead of a missing file.
         """
         train = canonical["train"]
         if self.calibration_size <= 0 or self.calibration_size >= len(train):
@@ -175,8 +136,6 @@ class BaseDatasetLoader(ABC):
         calibration, remaining_train, group_allocations = _stratified_sample(
             train, self.calibration_size, self.seed
         )
-        # ids stay as-is (see _to_canonical_splits' comment on why); split
-        # must be updated so a calibration row doesn't claim to be "train".
         calibration = [replace(ex, split="calibration") for ex in calibration]
 
         updated = dict(canonical)
@@ -191,21 +150,10 @@ class BaseDatasetLoader(ABC):
     def _cap_split_sizes(
         self, canonical: dict[str, list[Example]]
     ) -> tuple[dict[str, list[Example]], dict]:
-        """Cap each split to `sample_size_caps`, once, deterministically.
-
-        Every downstream stage (teacher labeling, oracle labeling, student
-        training, eval) reads whatever ends up in `data/processed/` — this
-        is the one place dataset size is decided, so no stage re-samples on
-        its own and none of them can disagree about which queries exist.
-
-        A split whose cap is None, or whose cap is >= its current size, is
-        left untouched (this is how `validation` and `calibration` stay
-        uncapped by default). Otherwise: if the split has more than one
-        distinct `Example.difficulty` value (MATH's "1".."5" levels), the
-        target size is allocated proportionally across those groups so
-        every difficulty level stays represented; a split with a single
-        difficulty value (including GSM8K, where every example's
-        difficulty is None) falls back to plain seeded random sampling.
+        """Cap each split to sample_size_caps, once. A split with no cap
+        (or a cap >= its size) is left untouched. Stratifies by
+        Example.difficulty when more than one value is present, else
+        plain seeded random sampling.
         """
         capped: dict[str, list[Example]] = {}
         sample_report = {
@@ -248,14 +196,9 @@ def _group_by_difficulty(examples: list[Example]) -> dict:
 def _stratified_sample(
     examples: list[Example], target_size: int, seed: int
 ) -> tuple[list[Example], list[Example], dict]:
-    """Split `examples` into (selected, remaining) with `len(selected) == target_size`.
-
-    Stratified proportionally by `Example.difficulty` when more than one
-    distinct value is present — returns the per-difficulty allocation as
-    the third element, for manifest reporting. Falls back to plain seeded
-    random sampling when there's only one difficulty value in play (e.g.
-    GSM8K, where every example's difficulty is None); the third element is
-    then an empty dict.
+    """Split examples into (selected, remaining), len(selected) == target_size.
+    Stratified by Example.difficulty when >1 value is present (third
+    return value: per-group allocation); plain random sample otherwise.
     """
     difficulty_groups = _group_by_difficulty(examples)
     rng = random.Random(seed)
@@ -275,16 +218,15 @@ def _stratified_sample(
         n_selected = group_allocations[difficulty_key]
         selected.extend(pool[:n_selected])
         remaining.extend(pool[n_selected:])
-    rng.shuffle(selected)  # undo the group-by-group ordering
+    rng.shuffle(selected)  # undo group-by-group ordering
 
     return selected, remaining, group_allocations
 
 
 def _allocate_group_sizes(group_sizes: dict, target_size: int) -> dict:
-    """Largest-remainder allocation of `target_size` across groups, proportional
-    to each group's share of the total, capped at that group's own size, summing
-    to exactly `target_size` (rather than drifting from float-rounding error).
-    """
+    """Largest-remainder allocation of target_size across groups,
+    proportional to each group's share, capped at its own size, summing
+    to exactly target_size."""
     total = sum(group_sizes.values())
     difficulty_keys = sorted(group_sizes, key=lambda key: (key is None, key))
     exact_shares = {key: target_size * group_sizes[key] / total for key in difficulty_keys}
@@ -304,5 +246,5 @@ def _allocate_group_sizes(group_sizes: dict, target_size: int) -> dict:
                 remaining -= 1
                 allocated_this_pass = True
         if not allocated_this_pass:
-            break  # every group already at its own size; target_size > total (shouldn't happen)
+            break  # every group at its own size; target_size > total (shouldn't happen)
     return allocations
