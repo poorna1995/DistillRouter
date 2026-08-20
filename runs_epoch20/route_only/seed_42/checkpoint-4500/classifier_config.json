@@ -1,8 +1,0 @@
-{
-  "routing_labels": [
-    "small",
-    "medium",
-    "large"
-  ],
-  "route_head_dropout": 0.1
-}
