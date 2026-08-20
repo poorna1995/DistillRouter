@@ -34,7 +34,7 @@ class HuggingFaceCandidate(CandidateModel):
         "For example, if the final answer is 42, the last line must be "
         "exactly: \\boxed{42}\n"
     )
-    PROMPT_VERSION = "boxed-internal-cot-v3"  # bump on any ANSWER_INSTRUCTION change, to invalidate old cache
+    PROMPT_VERSION = "boxed-internal-cot-v3"  
     MAX_NEW_TOKENS = 1024
 
     def __init__(self, tier: str, model_id: str) -> None:

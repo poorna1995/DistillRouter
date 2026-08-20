@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """DistillRouter — single entry point for the project.
 
+Pipeline: oracle-label (ground truth) -> label-data (teacher, v1/v2) ->
+build-student-data (join query + teacher output) -> train-student-{
+classifier,dual} (Experiment 1: route-only / Experiment 2: route +
+reasoning, dual-head) -> select-router-checkpoint (validation-only
+selection) -> evaluate-router (test, once).
+
 Usage:
     python run.py list-datasets
     python run.py prepare-data --dataset gsm8k
@@ -15,16 +21,21 @@ Usage:
     python run.py oracle-label --dataset gsm8k --split calibration
     python run.py oracle-label --all --split calibration
 
-    python run.py build-sft-data --all --teacher qwen2.5-3b-v2
+    python run.py build-student-data --all --teacher qwen2.5-3b-v2
 
-Not yet implemented: student SFT training itself, and a CLI subcommand
-for evaluation/oracle_check.py's teacher-vs-oracle check. New subcommands
-go in build_parser() below rather than new top-level scripts.
+    python run.py train-student-classifier --all --teacher qwen2.5-3b-v2
+    python run.py train-student-dual --all --teacher qwen2.5-3b-v2
+
+    python run.py select-router-checkpoint --variant classifier \\
+        --checkpoint-root checkpoints/student-classifier --all --teacher qwen2.5-3b-v2
+    python run.py evaluate-router --variant classifier \\
+        --checkpoint-dir checkpoints/student-classifier-best --all --teacher qwen2.5-3b-v2 --split test
+
+New subcommands go in build_parser() below rather than new top-level scripts.
 """
 from __future__ import annotations
 
 import argparse
-import json
 
 from dataset import datasets, get_loader_class
 
@@ -109,8 +120,8 @@ def cmd_label_data(args: argparse.Namespace) -> None:
             )
 
 
-def cmd_build_sft_data(args: argparse.Namespace) -> None:
-    from student.data import build_sft_records
+def cmd_build_student_data(args: argparse.Namespace) -> None:
+    from student.data import build_distillation_dataset
     from teacher.base import get_teacher_class  # lazy: pulls in torch/transformers at import time
 
     targets = datasets() if args.all else args.dataset
@@ -120,53 +131,13 @@ def cmd_build_sft_data(args: argparse.Namespace) -> None:
     teacher_cls = get_teacher_class(args.teacher)
     for name in targets:
         for split in args.split:
-            build_sft_records(
+            build_distillation_dataset(
                 name, teacher_cls.prompt_version, output_version=teacher_cls.output_version, split=split,
-                include_reasoning=not args.route_only,
             )
 
 
-def cmd_train_student(args: argparse.Namespace) -> None:
-    from pathlib import Path
-
-    from common.config import PROJECT_ROOT
-    from student.train import DEFAULT_STUDENT_MODEL_ID, train_student
-    from teacher.base import get_teacher_class  # lazy: pulls in torch/transformers at import time
-
-    targets = datasets() if args.all else args.dataset
-    if not targets:
-        print("Nothing to do: pass --dataset <name> [<name> ...] or --all.")
-        return
-    teacher_cls = get_teacher_class(args.teacher)
-    variant = "sft-route-only" if args.route_only else "sft"
-    checkpoint_dir = Path(args.checkpoint_dir) if args.checkpoint_dir else (
-        PROJECT_ROOT / "checkpoints" / f"student-{variant}"
-    )
-    train_student(
-        targets,
-        teacher_cls.output_version,
-        checkpoint_dir,
-        model_id=args.model_id or DEFAULT_STUDENT_MODEL_ID,
-        variant=variant,
-        split=args.split,
-        num_train_epochs=args.epochs,
-    )
-
-
-def cmd_evaluate_student(args: argparse.Namespace) -> None:
-    from pathlib import Path
-
-    from evaluation.student_eval import (
-        generate_student_predictions,
-        latency_comparison,
-        reasoning_diversity,
-        reasoning_embedding_similarity,
-        route_accuracy_vs_teacher,
-        save_predictions,
-        teacher_agreement_report,
-    )
-    from common.schema import TeacherLabel, read_jsonl
-    from common.config import TEACHER_DIR
+def cmd_build_binary_student_data(args: argparse.Namespace) -> None:
+    from student.data import build_binary_distillation_dataset
     from teacher.base import get_teacher_class  # lazy: pulls in torch/transformers at import time
 
     targets = datasets() if args.all else args.dataset
@@ -175,40 +146,15 @@ def cmd_evaluate_student(args: argparse.Namespace) -> None:
         return
     teacher_cls = get_teacher_class(args.teacher)
     for name in targets:
-        print(f"\n=== Evaluating student on '{name}/{args.split}' (vs teacher '{args.teacher}') ===")
-        predictions = generate_student_predictions(args.checkpoint_dir, name, args.split)
-
-        accuracy = route_accuracy_vs_teacher(predictions, name, teacher_cls.output_version, args.split)
-        print("Routing accuracy vs teacher:", accuracy)
-        agreement = teacher_agreement_report(predictions, name, teacher_cls.output_version, args.split)
-        print("Teacher Agreement / Distillation Fidelity (macro F1, per-tier P/R/F1, confusion matrix):", agreement)
-
-        report = {"teacher_agreement_accuracy": accuracy, "teacher_agreement_distillation_fidelity": agreement}
-
-        teacher_path = TEACHER_DIR / name / teacher_cls.output_version / f"{args.split}.jsonl"
-        if teacher_path.exists():
-            teacher_labels = read_jsonl(teacher_path, TeacherLabel)
-            latency = latency_comparison(predictions, [label.latency_seconds for label in teacher_labels])
-            print("Latency:", latency)
-            report["latency"] = latency
-
-        diversity = reasoning_diversity([p["reasoning"] for p in predictions])
-        print("Reasoning diversity (exact-match):", diversity)
-        similarity = reasoning_embedding_similarity([p["reasoning"] for p in predictions])
-        print("Reasoning diversity (embedding similarity, lower = more diverse):", similarity)
-        report["reasoning_diversity"] = {"exact_match": diversity, "embedding_similarity": similarity}
-
-        eval_dir = Path(args.checkpoint_dir) / f"eval_{name}_{args.split}"
-        eval_dir.mkdir(parents=True, exist_ok=True)
-        (eval_dir / "classification_report.json").write_text(json.dumps(report, indent=2))
-        n_saved = save_predictions(
-            predictions, name, teacher_cls.output_version, args.split, str(eval_dir / "predictions.jsonl")
-        )
-        print(f"Saved classification_report.json + predictions.jsonl ({n_saved} rows) -> {eval_dir}")
+        for split in args.split:
+            build_binary_distillation_dataset(name, output_version=teacher_cls.output_version, split=split)
 
 
-def cmd_select_checkpoint(args: argparse.Namespace) -> None:
-    from evaluation.student_eval import freeze_checkpoint, select_best_checkpoint
+def cmd_train_student_dual(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from common.config import PROJECT_ROOT
+    from student.train_dual import DEFAULT_STUDENT_MODEL_ID, train_student_dual
     from teacher.base import get_teacher_class  # lazy: pulls in torch/transformers at import time
 
     targets = datasets() if args.all else args.dataset
@@ -216,7 +162,105 @@ def cmd_select_checkpoint(args: argparse.Namespace) -> None:
         print("Nothing to do: pass --dataset <name> [<name> ...] or --all.")
         return
     teacher_cls = get_teacher_class(args.teacher)
-    result = select_best_checkpoint(args.checkpoint_root, targets, teacher_cls.output_version, split=args.split)
+    checkpoint_dir = Path(args.checkpoint_dir) if args.checkpoint_dir else (
+        PROJECT_ROOT / "checkpoints" / "student-dual"
+    )
+    train_student_dual(
+        targets,
+        teacher_cls.output_version,
+        checkpoint_dir,
+        model_id=args.model_id or DEFAULT_STUDENT_MODEL_ID,
+        split=args.split,
+        num_train_epochs=args.epochs,
+        learning_rate=args.learning_rate,
+        warmup_ratio=args.warmup_ratio,
+        lr_scheduler_type=args.lr_scheduler_type,
+        lambda_route=args.lambda_route,
+        lambda_reason=args.lambda_reason,
+        route_head_dropout=args.route_head_dropout,
+        oversample_ratio=args.oversample_ratio,
+        seed=args.seed,
+        label_space=args.label_space,
+    )
+
+
+def cmd_train_student_classifier(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from common.config import PROJECT_ROOT
+    from student.train_classifier import DEFAULT_STUDENT_MODEL_ID, train_student_classifier
+    from teacher.base import get_teacher_class  # lazy: pulls in torch/transformers at import time
+
+    targets = datasets() if args.all else args.dataset
+    if not targets:
+        print("Nothing to do: pass --dataset <name> [<name> ...] or --all.")
+        return
+    teacher_cls = get_teacher_class(args.teacher)
+    checkpoint_dir = Path(args.checkpoint_dir) if args.checkpoint_dir else (
+        PROJECT_ROOT / "checkpoints" / "student-classifier"
+    )
+    train_student_classifier(
+        targets,
+        teacher_cls.output_version,
+        checkpoint_dir,
+        model_id=args.model_id or DEFAULT_STUDENT_MODEL_ID,
+        split=args.split,
+        num_train_epochs=args.epochs,
+        learning_rate=args.learning_rate,
+        warmup_ratio=args.warmup_ratio,
+        lr_scheduler_type=args.lr_scheduler_type,
+        route_head_dropout=args.route_head_dropout,
+        oversample_ratio=args.oversample_ratio,
+        seed=args.seed,
+        label_space=args.label_space,
+    )
+
+
+def cmd_evaluate_router(args: argparse.Namespace) -> None:
+    from evaluation.router_eval import evaluate_router_checkpoint
+    from teacher.base import get_teacher_class  # lazy: pulls in torch/transformers at import time
+
+    if args.variant == "classifier":
+        from student.train_classifier import load_classifier_checkpoint, predict_route
+        load_fn = load_classifier_checkpoint
+    else:
+        from student.train_dual import load_dual_head_checkpoint, predict_route
+        load_fn = load_dual_head_checkpoint
+
+    targets = datasets() if args.all else args.dataset
+    if not targets:
+        print("Nothing to do: pass --dataset <name> [<name> ...] or --all.")
+        return
+    teacher_cls = get_teacher_class(args.teacher)
+    for name in targets:
+        print(f"\n=== Evaluating {args.variant} router on '{name}/{args.split}' (vs teacher '{args.teacher}') ===")
+        report = evaluate_router_checkpoint(
+            load_fn, predict_route, args.checkpoint_dir, name, teacher_cls.output_version, split=args.split,
+        )
+        print(f"  accuracy={report.get('accuracy')}, macro_f1={report.get('macro_f1')}, "
+              f"avg_latency_seconds={report.get('latency', {}).get('student_avg_latency_seconds')}")
+
+
+def cmd_select_router_checkpoint(args: argparse.Namespace) -> None:
+    from evaluation.metrics import freeze_checkpoint
+    from evaluation.router_eval import select_best_router_checkpoint
+    from teacher.base import get_teacher_class  # lazy: pulls in torch/transformers at import time
+
+    if args.variant == "classifier":
+        from student.train_classifier import load_classifier_checkpoint, predict_route
+        load_fn = load_classifier_checkpoint
+    else:
+        from student.train_dual import load_dual_head_checkpoint, predict_route
+        load_fn = load_dual_head_checkpoint
+
+    targets = datasets() if args.all else args.dataset
+    if not targets:
+        print("Nothing to do: pass --dataset <name> [<name> ...] or --all.")
+        return
+    teacher_cls = get_teacher_class(args.teacher)
+    result = select_best_router_checkpoint(
+        load_fn, predict_route, args.checkpoint_root, targets, teacher_cls.output_version, split=args.split,
+    )
     if args.freeze_to:
         freeze_checkpoint(result["best"]["checkpoint"], args.freeze_to)
 
@@ -300,107 +344,253 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_label.set_defaults(func=cmd_label_data)
 
-    p_build_sft = subparsers.add_parser(
-        "build-sft-data", help="Join teacher output with query text into the student's SFT training records."
+    p_build_student_data = subparsers.add_parser(
+        "build-student-data",
+        help="Join teacher output with query text into the {query, teacher_route, routing_reasoning} "
+        "records both student variants train on.",
     )
-    p_build_sft.add_argument(
+    p_build_student_data.add_argument(
         "--dataset", nargs="+", default=[], metavar="NAME",
         help="Dataset name(s) to build, e.g. --dataset gsm8k math",
     )
-    p_build_sft.add_argument("--all", action="store_true", help="Build for every registered dataset.")
-    p_build_sft.add_argument(
+    p_build_student_data.add_argument("--all", action="store_true", help="Build for every registered dataset.")
+    p_build_student_data.add_argument(
         "--teacher", required=True, metavar="NAME",
         help="Teacher backend whose output to use. See `list-teachers`.",
     )
-    p_build_sft.add_argument(
+    p_build_student_data.add_argument(
         "--split", nargs="+", default=["train"], metavar="SPLIT",
         help="Canonical split(s) to build (default: train).",
     )
-    p_build_sft.add_argument(
-        "--route-only", action="store_true",
-        help="Ablation variant: drop <REASON> from the target, route-only. "
-        "Writes alongside the reasoning+route baseline, doesn't replace it.",
-    )
-    p_build_sft.set_defaults(func=cmd_build_sft_data)
+    p_build_student_data.set_defaults(func=cmd_build_student_data)
 
-    p_train = subparsers.add_parser(
-        "train-student", help="SFT a small causal LM on the student's training records (TRL SFTTrainer)."
+    p_build_binary_student_data = subparsers.add_parser(
+        "build-binary-student-data",
+        help="Derive a binary-label ({small,medium}->cheap, large->large) copy of an existing "
+        "build-student-data output as its own file -- data/student/<dataset>/<output_version>/"
+        "binary/<split>.jsonl -- so label_space=binary training reads a real source-of-truth "
+        "file instead of collapsing labels in memory at tokenization time. Run build-student-data "
+        "first; never modifies the 3-way file it reads from.",
     )
-    p_train.add_argument(
+    p_build_binary_student_data.add_argument(
+        "--dataset", nargs="+", default=[], metavar="NAME",
+        help="Dataset name(s) to derive, e.g. --dataset gsm8k math",
+    )
+    p_build_binary_student_data.add_argument("--all", action="store_true", help="Derive for every registered dataset.")
+    p_build_binary_student_data.add_argument(
+        "--teacher", required=True, metavar="NAME",
+        help="Teacher backend whose build-student-data output to derive from. See `list-teachers`.",
+    )
+    p_build_binary_student_data.add_argument(
+        "--split", nargs="+", default=["train"], metavar="SPLIT",
+        help="Canonical split(s) to derive (default: train -- the only split train-student-classifier/"
+        "train-student-dual actually read).",
+    )
+    p_build_binary_student_data.set_defaults(func=cmd_build_binary_student_data)
+
+    p_train_dual = subparsers.add_parser(
+        "train-student-dual",
+        help="Train the dual-head student variant (Experiment 2): a route classifier head + a "
+        "reasoning LM head on one shared trunk, jointly -- reasoning as a training-only auxiliary "
+        "signal, never generated at inference. See student/train_dual.py's module docstring.",
+    )
+    p_train_dual.add_argument(
         "--dataset", nargs="+", default=[], metavar="NAME",
         help="Dataset name(s) to pool into one training set, e.g. --dataset gsm8k math",
     )
-    p_train.add_argument("--all", action="store_true", help="Pool every registered dataset.")
-    p_train.add_argument(
+    p_train_dual.add_argument("--all", action="store_true", help="Pool every registered dataset.")
+    p_train_dual.add_argument(
         "--teacher", required=True, metavar="NAME",
-        help="Teacher backend whose SFT records to train on (must have run build-sft-data first).",
+        help="Teacher backend whose distillation records to train on (must have run build-student-data first).",
     )
-    p_train.add_argument(
-        "--route-only", action="store_true",
-        help="Train on the route-only ablation variant instead of the reasoning+route baseline.",
+    p_train_dual.add_argument(
+        "--split", default="train", metavar="SPLIT", help="Split to train on (default: train).",
     )
-    p_train.add_argument("--split", default="train", metavar="SPLIT", help="Split to train on (default: train).")
-    p_train.add_argument(
+    p_train_dual.add_argument(
         "--model-id", default=None, metavar="HF_ID",
-        help="Base model to fine-tune (default: google/gemma-3-270m-it, see student/train.py).",
+        help="Base model to fine-tune (default: google/gemma-3-270m-it, see student/train_dual.py).",
     )
-    p_train.add_argument("--epochs", type=float, default=3.0, help="Training epochs (default: 3).")
-    p_train.add_argument(
+    p_train_dual.add_argument("--epochs", type=float, default=3.0, help="Training epochs (default: 3).")
+    p_train_dual.add_argument(
+        "--learning-rate", type=float, default=2e-5, metavar="LR",
+        help="AdamW peak learning rate (default: 2e-5, every prior run in this project's history).",
+    )
+    p_train_dual.add_argument(
+        "--warmup-ratio", type=float, default=0.0, metavar="R",
+        help="Fraction of total steps to linearly ramp the LR up from 0 to --learning-rate before "
+        "--lr-scheduler-type's decay takes over (default: 0.0 = no warmup, Trainer's own default).",
+    )
+    p_train_dual.add_argument(
+        "--lr-scheduler-type", default="linear", metavar="TYPE",
+        help="HF Trainer schedule name (default: linear -- decays --learning-rate to 0 over the full "
+        "run). Common alternatives: cosine, constant, constant_with_warmup. The decay curve is computed "
+        "against --epochs * steps-per-epoch, so it's specific to the epoch budget this run uses.",
+    )
+    p_train_dual.add_argument(
+        "--lambda-route", type=float, default=1.0, metavar="W", help="Weight on the route classifier loss.",
+    )
+    p_train_dual.add_argument(
+        "--lambda-reason", type=float, default=1.0, metavar="W", help="Weight on the reasoning LM loss.",
+    )
+    p_train_dual.add_argument(
+        "--route-head-dropout", type=float, default=0.1, metavar="P",
+        help="Dropout inside the route classifier's MLP (LayerNorm -> Linear -> GELU -> Dropout -> Linear).",
+    )
+    p_train_dual.add_argument(
+        "--oversample-ratio", type=float, default=0.0, metavar="R",
+        help="Oversample minority routing tiers toward the majority tier's count before training "
+        "(0.0=off/default, 1.0=full balance, 0.5=halfway). See student/data.py's "
+        "oversample_minority_tiers -- duplicated examples carry their routing_reasoning too, so "
+        "this affects the reasoning LM loss as well as the route classifier loss.",
+    )
+    p_train_dual.add_argument(
+        "--seed", type=int, default=42, metavar="N",
+        help="Random seed, set before the model (and route_head's random init) is constructed -- "
+        "not just TrainingArguments' own seed, which is too late for that (default: 42).",
+    )
+    p_train_dual.add_argument(
         "--checkpoint-dir", default=None, metavar="PATH",
-        help="Output dir for the trained checkpoint (default: checkpoints/student-<variant>/).",
+        help="Output dir for the trained checkpoint (default: checkpoints/student-dual/).",
     )
-    p_train.set_defaults(func=cmd_train_student)
+    p_train_dual.add_argument(
+        "--label-space", default="3way", choices=["3way", "binary"], metavar="SPACE",
+        help="Route classifier's target label space (default: 3way = small/medium/large). "
+        "'binary' collapses to cheap ({small,medium}) vs large -- see common.config."
+        "BINARY_ROUTING_LABELS and student/train_dual.py's train_student_dual() docstring. "
+        "Teacher-labeled data on disk is read as-is either way; only the classifier head's "
+        "target and evaluate-router's/select-router-checkpoint's scoring adapt.",
+    )
+    p_train_dual.set_defaults(func=cmd_train_student_dual)
 
-    p_eval_student = subparsers.add_parser(
-        "evaluate-student",
-        help="Routing accuracy vs teacher, latency, and reasoning diversity for a trained checkpoint. "
-        "For cross-domain generalization, just pass a checkpoint trained on one dataset and "
-        "--dataset for a different one — no separate mode needed.",
+    p_train_classifier = subparsers.add_parser(
+        "train-student-classifier",
+        help="Train the classifier-only student variant (Experiment 1): route_head -> "
+        "CrossEntropy(route), no reasoning anywhere. The control for whether reasoning "
+        "supervision (train-student-dual, Experiment 2) actually helps routing accuracy. "
+        "See student/train_classifier.py's module docstring.",
     )
-    p_eval_student.add_argument(
-        "--checkpoint-dir", required=True, metavar="PATH", help="Trained student checkpoint (from train-student).",
+    p_train_classifier.add_argument(
+        "--dataset", nargs="+", default=[], metavar="NAME",
+        help="Dataset name(s) to pool into one training set, e.g. --dataset gsm8k math",
     )
-    p_eval_student.add_argument(
+    p_train_classifier.add_argument("--all", action="store_true", help="Pool every registered dataset.")
+    p_train_classifier.add_argument(
+        "--teacher", required=True, metavar="NAME",
+        help="Teacher backend whose distillation records to train on (must have run build-student-data first "
+        "-- only teacher_route is used, routing_reasoning is read but ignored).",
+    )
+    p_train_classifier.add_argument(
+        "--split", default="train", metavar="SPLIT", help="Split to train on (default: train).",
+    )
+    p_train_classifier.add_argument(
+        "--model-id", default=None, metavar="HF_ID",
+        help="Base model to fine-tune (default: google/gemma-3-270m-it, see student/train_classifier.py).",
+    )
+    p_train_classifier.add_argument("--epochs", type=float, default=3.0, help="Training epochs (default: 3).")
+    p_train_classifier.add_argument(
+        "--learning-rate", type=float, default=2e-5, metavar="LR",
+        help="AdamW peak learning rate (default: 2e-5, every prior run in this project's history).",
+    )
+    p_train_classifier.add_argument(
+        "--warmup-ratio", type=float, default=0.0, metavar="R",
+        help="Fraction of total steps to linearly ramp the LR up from 0 to --learning-rate before "
+        "--lr-scheduler-type's decay takes over (default: 0.0 = no warmup, Trainer's own default).",
+    )
+    p_train_classifier.add_argument(
+        "--lr-scheduler-type", default="linear", metavar="TYPE",
+        help="HF Trainer schedule name (default: linear -- decays --learning-rate to 0 over the full "
+        "run). Common alternatives: cosine, constant, constant_with_warmup. The decay curve is computed "
+        "against --epochs * steps-per-epoch, so it's specific to the epoch budget this run uses.",
+    )
+    p_train_classifier.add_argument(
+        "--route-head-dropout", type=float, default=0.1, metavar="P",
+        help="Dropout inside the route classifier's MLP (LayerNorm -> Linear -> GELU -> Dropout -> Linear).",
+    )
+    p_train_classifier.add_argument(
+        "--oversample-ratio", type=float, default=0.0, metavar="R",
+        help="Oversample minority routing tiers toward the majority tier's count before training "
+        "(0.0=off/default, 1.0=full balance, 0.5=halfway). See student/data.py's "
+        "oversample_minority_tiers.",
+    )
+    p_train_classifier.add_argument(
+        "--seed", type=int, default=42, metavar="N",
+        help="Random seed, set before the model (and route_head's random init) is constructed (default: 42).",
+    )
+    p_train_classifier.add_argument(
+        "--checkpoint-dir", default=None, metavar="PATH",
+        help="Output dir for the trained checkpoint (default: checkpoints/student-classifier/).",
+    )
+    p_train_classifier.add_argument(
+        "--label-space", default="3way", choices=["3way", "binary"], metavar="SPACE",
+        help="Route classifier's target label space (default: 3way = small/medium/large). "
+        "'binary' collapses to cheap ({small,medium}) vs large -- see common.config."
+        "BINARY_ROUTING_LABELS and student/train_classifier.py's train_student_classifier() "
+        "docstring. Teacher-labeled data on disk is read as-is either way; only the "
+        "classifier head's target and evaluate-router's/select-router-checkpoint's scoring "
+        "adapt.",
+    )
+    p_train_classifier.set_defaults(func=cmd_train_student_classifier)
+
+    p_eval_router = subparsers.add_parser(
+        "evaluate-router",
+        help="Routing accuracy vs teacher, per-tier P/R/F1, confusion matrix, and latency for a "
+        "single-forward-pass router checkpoint (train-student-classifier or train-student-dual).",
+    )
+    p_eval_router.add_argument(
+        "--variant", required=True, choices=["classifier", "dual"],
+        help="Which router architecture the checkpoint is (classifier=train-student-classifier, "
+        "dual=train-student-dual) -- picks the matching load_*_checkpoint/predict_route pair.",
+    )
+    p_eval_router.add_argument(
+        "--checkpoint-dir", required=True, metavar="PATH",
+        help="Trained router checkpoint (from train-student-classifier or train-student-dual).",
+    )
+    p_eval_router.add_argument(
         "--dataset", nargs="+", default=[], metavar="NAME",
         help="Dataset(s) to evaluate on, e.g. --dataset gsm8k math",
     )
-    p_eval_student.add_argument("--all", action="store_true", help="Evaluate on every registered dataset.")
-    p_eval_student.add_argument(
+    p_eval_router.add_argument("--all", action="store_true", help="Evaluate on every registered dataset.")
+    p_eval_router.add_argument(
         "--teacher", required=True, metavar="NAME",
         help="Teacher backend the checkpoint was distilled from (for accuracy/latency comparison).",
     )
-    p_eval_student.add_argument(
+    p_eval_router.add_argument(
         "--split", default="validation", metavar="SPLIT",
-        help="Split to evaluate on (default: validation — use a split the checkpoint wasn't trained on).",
+        help="Split to evaluate on (default: validation -- use a split the checkpoint wasn't trained on).",
     )
-    p_eval_student.set_defaults(func=cmd_evaluate_student)
+    p_eval_router.set_defaults(func=cmd_evaluate_router)
 
-    p_select = subparsers.add_parser(
-        "select-checkpoint",
-        help="Evaluate every checkpoint-<step> saved by train-student (one per epoch) on validation "
-        "and report the one with the highest macro F1. Pass --freeze-to to also copy the winner.",
+    p_select_router = subparsers.add_parser(
+        "select-router-checkpoint",
+        help="Evaluate every checkpoint-<step> saved by train-student-classifier or train-student-dual "
+        "(one per epoch) on validation and report the one with the highest macro F1. Pass "
+        "--freeze-to to also copy the winner.",
     )
-    p_select.add_argument(
+    p_select_router.add_argument(
+        "--variant", required=True, choices=["classifier", "dual"],
+        help="Which router architecture the checkpoints are.",
+    )
+    p_select_router.add_argument(
         "--checkpoint-root", required=True, metavar="PATH",
-        help="train-student's --checkpoint-dir (the directory containing checkpoint-<step> subdirs).",
+        help="train-student-classifier's/train-student-dual's --checkpoint-dir "
+        "(the directory containing checkpoint-<step> subdirs).",
     )
-    p_select.add_argument(
+    p_select_router.add_argument(
         "--dataset", nargs="+", default=[], metavar="NAME",
         help="Dataset(s) to pool for scoring, e.g. --dataset gsm8k math",
     )
-    p_select.add_argument("--all", action="store_true", help="Pool every registered dataset.")
-    p_select.add_argument(
+    p_select_router.add_argument("--all", action="store_true", help="Pool every registered dataset.")
+    p_select_router.add_argument(
         "--teacher", required=True, metavar="NAME", help="Teacher backend the checkpoints were distilled from.",
     )
-    p_select.add_argument(
+    p_select_router.add_argument(
         "--split", default="validation", metavar="SPLIT", help="Split to score on (default: validation).",
     )
-    p_select.add_argument(
+    p_select_router.add_argument(
         "--freeze-to", default=None, metavar="PATH",
-        help="Copy the winning checkpoint here (e.g. checkpoints/student-best/). Deliberate, opt-in — "
-        "omit to just see the report and freeze manually later.",
+        help="Copy the winning checkpoint here. Deliberate, opt-in — omit to just see the report.",
     )
-    p_select.set_defaults(func=cmd_select_checkpoint)
+    p_select_router.set_defaults(func=cmd_select_router_checkpoint)
 
     p_oracle = subparsers.add_parser(
         "oracle-label", help="Run every candidate tier on every query to derive ground-truth routing labels."
