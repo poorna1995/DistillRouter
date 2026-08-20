@@ -1,32 +1,83 @@
 # DistillRouter — End-to-End Pipeline
 
-A from-scratch walkthrough for someone new to this repo: setup through a
-trained, evaluated router, both label spaces (binary and 3-way), plus how
-to reproduce the paper's actual multi-seed tables and figures. Every
-command below is copied from `run.py --help` / the scripts' own `--help`,
-not reconstructed from memory — run `--help` yourself if anything drifts.
+## Quickstart
 
-See [README.md](README.md) for project layout and [DISTILLROUTER_SPEC.md](DISTILLROUTER_SPEC.md)
-for the design rationale. See [EXPERIMENTS.md](EXPERIMENTS.md) for every
-result this pipeline has ever produced, with the exact command that made it.
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 
-## 0. Before you start
+make data oracle-data teacher-data   # one-time setup: data, ground truth, teacher labels
+make train-binary                    # one seed, both variants — smoke test, ~20-40 min
+```
 
-- **GPU required** in practice — every stage from `oracle-label` onward
-  loads real Hugging Face causal LMs (`google/gemma-3-270m-it`,
-  `Qwen/Qwen2.5-0.5B-Instruct`, `google/gemma-3-1b-it`, plus whichever
-  teacher you pick). CPU will technically run but is not how this was ever
-  actually timed.
-- **Disk space**: a single 10-seed × 2-variant sweep (one label space, one
-  backbone) writes ~54GB of checkpoints (270M backbone) to ~190GB (1B
-  backbone) — the full 2×2 grid (label space × backbone) this paper reports
-  is ~480GB before you even get to the epoch ablations. Point
-  `--checkpoint-dir` somewhere with room, and see the note in §7 about what
-  you actually need to keep afterward.
-- **`pip install -r requirements.txt`** inside a venv (`python3 -m venv .venv && source .venv/bin/activate`) — `datasets`, `torch`, `transformers`, `trl`, `sentence-transformers`, `scikit-learn`, `matplotlib`.
-- All commands below run from the repo root.
+That gets you a trained, evaluated router (binary label space) end to end.
+`make help` lists every target. Requires a GPU in practice — every stage
+from `oracle-data` onward loads real HF causal LMs.
 
-## 1. Prepare the datasets
+## Reproducing the paper's tables
+
+Each row below is one seed sweep (0-9), both variants, paired-bootstrap
+aggregated — this is what `research.tex`'s tables actually report, not a
+single-seed run.
+
+| Command | Label space | Backbone | Table | Approx. time |
+|---|---|---|---|---:|
+| `make reproduce-table3`  | binary | 270M | Table 3 (primary result) | ~4h |
+| `make reproduce-table4`  | binary | 1B   | Table 4 | ~13h |
+| `make reproduce-table8`  | 3-way  | 270M | Table 8 | ~4h |
+| `make reproduce-table10` | 3-way  | 1B   | Table 10 | ~13h |
+| `make reproduce-all`     | all four above | | | ~34h |
+
+Then:
+
+```bash
+make figures   # regenerate every paper figure
+```
+
+`research/research.tex` (NeurIPS format) compiles with `pdflatex` —
+not available in this environment; needs a TeX Live install elsewhere.
+
+**Timings above are measured**, from this project's own run history
+(file mtimes across a completed sweep), not estimates — see the bottom
+of `EXPERIMENTS.md` for the exact seed/config each table came from.
+
+**Disk space**: `reproduce-table3`/`table8` write ~54GB each (270M
+backbone), `table4`/`table10` ~190GB each (1B backbone) — full
+`reproduce-all` is ~480GB. Only `predictions.jsonl` +
+`classification_report.json` per run are worth keeping long-term; the
+rest (`model.safetensors`, `checkpoint-*/`) is regenerable — see "Known
+gaps" below.
+
+## Known gaps
+
+- **`multiseed/routellm_bert_scores.json`** (the RouteLLM baseline row in
+  `research.tex`'s main table) has no generating script anywhere in this
+  repo. Track down or rewrite it before claiming full reproducibility.
+- **`research/research.md`**, a Markdown twin of `research.tex` that old
+  tooling (`EXPERIMENTS.md`, prior session notes) still references, does
+  not currently exist on disk. `research.tex` is the sole source of
+  truth for now.
+- **`research/checklist.tex`** hasn't been updated through several recent
+  restructures of the results section — verify its table/figure
+  references before submission.
+- Full checkpoints (`model.safetensors`, `checkpoint-*/`) are
+  multi-GB-per-seed and regenerable by re-running the relevant `make`
+  target with the same `SEED=`; they are not bit-identical on rerun
+  (GPU non-determinism) but are the same experiment statistically. Only
+  `predictions.jsonl`/`classification_report.json` are worth keeping
+  long-term. See `EXPERIMENTS.md` for every seed/config already run.
+
+---
+
+## Manual pipeline (every flag, one stage at a time)
+
+Everything below is what the `make` targets above actually run. Use this
+when you need something the targets don't cover — a third dataset, a
+custom `--lambda-reason`, a different backbone, one dataset instead of
+`--all`, etc. Every command here is copied from `run.py --help` / the
+scripts' own `--help` — run `--help` yourself if anything drifts.
+
+### 1. Prepare the datasets
 
 ```bash
 python run.py list-datasets                 # gsm8k, math
@@ -42,7 +93,7 @@ split is carved out of train — it exists to become the teacher's few-shot
 demonstrations next, and is excluded from train so the teacher never sees
 its own demo set as a labeling target.
 
-## 2. Oracle-label (ground truth)
+### 2. Oracle-label (ground truth)
 
 ```bash
 python run.py oracle-label --all --split calibration   # do this first — teacher few-shot needs it
@@ -59,7 +110,7 @@ teacher. Writes `data/oracle/<dataset>/<split>.labels.jsonl`. This is the
 slowest stage (three full model passes per query) — `--limit N` lets you
 smoke-test on a slice first.
 
-## 3. Teacher-label
+### 3. Teacher-label
 
 ```bash
 python run.py list-teachers          # oracle-direct, qwen2.5-3b-v1, qwen2.5-3b-v2
@@ -78,7 +129,7 @@ Both prompted teachers few-shot from `calibration`'s oracle labels (step
 is `data/teacher/<dataset>/<output_version>/<split>.jsonl`, incremental
 and cached on `(query_id, prompt_version)` — safe to re-run.
 
-## 4. Build student training data
+### 4. Build student training data
 
 ```bash
 python run.py build-student-data --all --teacher qwen2.5-3b-v2 --split train
@@ -94,7 +145,7 @@ file (`.../binary/train.jsonl`) — run it after the first, never edits the
 3-way file it reads from. You need both if you're training both label
 spaces.
 
-## 5. Train the student router
+### 5. Train the student router
 
 Two architectural variants × two label spaces = four combinations. Pick
 what you need:
@@ -116,7 +167,7 @@ google/gemma-3-1b-it` for the paper's 1B-backbone configuration. See
 `--help` for `--lambda-route`/`--lambda-reason` (dual only),
 `--oversample-ratio`, `--route-head-dropout`.
 
-## 6. Pick the best checkpoint (validation-only, once)
+### 6. Pick the best checkpoint (validation-only, once)
 
 ```bash
 python run.py select-router-checkpoint --variant classifier \
@@ -129,7 +180,7 @@ Scores every `checkpoint-<step>` under `--checkpoint-root` on
 `--freeze-to` only if you pass that flag. `--variant` must match what you
 trained in step 5 (`classifier` or `dual`).
 
-## 7. Evaluate on test (once)
+### 7. Evaluate on test (once)
 
 ```bash
 python run.py evaluate-router --variant classifier \
@@ -139,14 +190,9 @@ python run.py evaluate-router --variant classifier \
 
 Writes `predictions.jsonl` + `classification_report.json` per dataset
 under the checkpoint dir — these two files are the only output of steps
-5-7 you actually need to keep long-term; everything else (`model.safetensors`,
-`checkpoint-*/`) is a multi-hundred-MB-to-GB regenerable artifact. This
-project learned that the hard way — see the note at the bottom of this file.
+5-7 you actually need to keep long-term.
 
-## 8. The paper-grade version: multi-seed
-
-Steps 5-7 for one seed is exploratory. The paper's actual reported numbers
-are a 10-seed paired-bootstrap protocol:
+### 8. Multi-seed (what the `reproduce-table*` targets run)
 
 ```bash
 ./multiseed/run_multiseed_binary.sh          # 270M, binary   — Table 3
@@ -156,10 +202,8 @@ are a 10-seed paired-bootstrap protocol:
 ```
 
 Each script loops seeds 0-9 through steps 5-7 for both variants, skips
-any seed/variant already done (checks for `predictions.jsonl`), and
-writes to `runs_binary/`, `runs_binary_1b/`, `runs/`, `runs_1b/`
-respectively. Then aggregate (run from repo root — these scripts need
-repo root on `PYTHONPATH`):
+any seed/variant already done (checks for `predictions.jsonl`). Then
+aggregate (run from repo root — needs repo root on `PYTHONPATH`):
 
 ```bash
 PYTHONPATH=. python3 multiseed/evaluate_multiseed_binary.py --runs-dir runs_binary
@@ -172,7 +216,7 @@ treated as independent samples (across-seed) — a 95% CI that excludes
 zero on the latter is what this paper calls a statistically reliable
 result. Add `--seeds N [N ...]` to aggregate a subset.
 
-## 9. Oracle-correctness check
+### 9. Oracle-correctness check
 
 Every step above scores against the *teacher's* decision (fidelity), not
 ground truth. To check against the independently-built oracle instead:
@@ -187,28 +231,16 @@ win over the teacher does not reliably imply a correctness win over
 ground truth, in most configurations tested. See `EXPERIMENTS.md`'s
 "Oracle (ground truth) accuracy check" section for the full numbers.
 
-## 10. Figures
+### 10. Figures
 
 ```bash
 cd research/figures && python3 make_figures.py
 ```
 
-**Gap worth knowing about**: this script's numbers are hand-copied
-constants, not read from `runs*/`'s predictions files or from
-`EXPERIMENTS.md` — if you rerun any experiment and get a different
-number, you must manually update the corresponding constant in
-`make_figures.py` before regenerating. No `--help`/CLI args; it always
-regenerates all twelve figures into the same directory.
-
-## 11. The paper itself
-
-`research/research.tex` (NeurIPS format, `neurips_2026.sty`) is the
-current source of truth — compile with `pdflatex` (not available in this
-environment; needs a TeX Live install elsewhere). `research/checklist.tex`
-is `\input{}`-ed by the main file. **Known gap**: `research/checklist.tex`
-has not been updated through several recent restructures of the results
-section — verify its table/figure references before submission, don't
-trust it as-is.
+This script's numbers are hand-copied constants, not read from `runs*/`'s
+predictions files or from `EXPERIMENTS.md` — if you rerun any experiment
+and get a different number, you must manually update the corresponding
+constant in `make_figures.py` before regenerating.
 
 ## Full pipeline at a glance
 
@@ -233,20 +265,7 @@ evaluate_multiseed*_oracle.py (aggregate across seeds, vs. ground truth)
 make_figures.py → research.tex → pdflatex
 ```
 
-## Known gaps a new contributor should know about
-
-- **`multiseed/routellm_bert_scores.json`** (the RouteLLM baseline row in
-  `research.tex`'s main table) has no generating script anywhere in this
-  repo. Track down or rewrite it before claiming full reproducibility.
-- **`research/research.md`** is referenced by old tooling
-  (`EXPERIMENTS.md`, prior session notes) as a Markdown twin of
-  `research.tex` but does not currently exist on disk. Currently
-  `research.tex` is the sole source of truth; unresolved whether the
-  Markdown twin comes back.
-- Only keep `predictions.jsonl` + `classification_report.json` long-term
-  from any `runs*/` directory — the full checkpoints (`model.safetensors`,
-  `checkpoint-*/`) are multi-GB-per-seed and fully regenerable by
-  re-running the relevant script above with the same `--seed`; they are
-  not bit-identical on rerun (GPU non-determinism) but are the same
-  experiment statistically. See `EXPERIMENTS.md` for every seed/config
-  this project has ever run, to avoid re-deriving a protocol from scratch.
+See [README.md](README.md) for project layout and
+[DISTILLROUTER_SPEC.md](DISTILLROUTER_SPEC.md) for the design rationale.
+See [EXPERIMENTS.md](EXPERIMENTS.md) for every result this pipeline has
+ever produced, with the exact command that made it.
