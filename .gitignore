@@ -23,29 +23,25 @@ data/unused/*
 # multi-seed runs*/ protocol below — nothing here is ever worth tracking.
 checkpoints/
 
-# --- runs*/, research_lambda_sweep/: trained-model artifacts -------------
-# These directories hold BOTH the actual model weights (multi-GB per seed,
-# regenerable via `make train-binary` / `make reproduce-table*` with the
-# documented seed, see EXPERIMENTS.md) AND the small prediction/report
-# files those weights produced (irreplaceable without re-running training).
-# Rather than ignore whole checkpoint-*/ directories, ignore only the heavy
-# filenames inside them — research_lambda_sweep/ in particular has no
-# separate best/ folder, so its only provenance IS inside checkpoint-*/,
-# and a directory-level ignore would silently discard it.
-**/model.safetensors
-**/*.bin
-**/tokenizer.json
-**/route_head.pt
-**/optimizer.pt
-**/scheduler.pt
-**/rng_state.pth
+# runs*/, research_lambda_sweep/: trained-model artifacts (weights +
+# predictions/reports) from experiments already run. Not needed for a new
+# clone to run the pipeline — regenerate your own via `make reproduce-
+# table3` etc. (see PIPELINE.md). The paper's actual reported numbers are
+# permanently recorded in EXPERIMENTS.md / research.tex either way; these
+# directories are raw provenance for independently re-auditing a specific
+# number, not something the pipeline itself depends on. Kept on local
+# disk, just not tracked in git.
+runs/
+runs_1b/
+runs_binary/
+runs_binary_1b/
+runs_epoch20/
+runs_epoch20_binary_10seed/
+research_lambda_sweep/
 
-# Verbose per-run training logs (multiseed/, runs_epoch20/, etc.) — content
-# is already summarized in EXPERIMENTS.md's tables; regenerate by
-# re-running the sweep if needed.
+# Verbose per-run training logs — content is already summarized in
+# EXPERIMENTS.md's tables.
 **/*.log
 
-# Manual duplicate-copy archive (superseded by the pattern-based tracking
-# above — predictions/reports now live in git in place, no separate copy
-# needed). Ignored so it's never accidentally committed if recreated.
+# Manual duplicate-copy archive, superseded by the above.
 results_archive/
