@@ -1,7 +1,10 @@
 # DistillRouter
 
 Distilling a large LLM routing policy into a lightweight student router.
-See [DISTILLROUTER_SPEC.md](DISTILLROUTER_SPEC.md) for the full design.
+See [DISTILLROUTER_SPEC.md](DISTILLROUTER_SPEC.md) for the full design, and
+[PIPELINE.md](PIPELINE.md) for the complete from-scratch, end-to-end
+runbook (setup through trained/evaluated router, both label spaces,
+multi-seed reproduction, figures, and the paper build).
 
 ## Project layout
 
