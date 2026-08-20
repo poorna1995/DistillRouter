@@ -1,0 +1,56 @@
+{
+  "n_matched": 500,
+  "accuracy": 0.614,
+  "macro_precision": 0.6998,
+  "macro_recall": 0.5004,
+  "macro_f1": 0.4914,
+  "per_tier": {
+    "small": {
+      "precision": 0.875,
+      "recall": 0.0909,
+      "f1": 0.1647,
+      "support": 77
+    },
+    "medium": {
+      "precision": 0.6,
+      "recall": 0.7344,
+      "f1": 0.6604,
+      "support": 241
+    },
+    "large": {
+      "precision": 0.6244,
+      "recall": 0.6758,
+      "f1": 0.6491,
+      "support": 182
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "small",
+      "medium",
+      "large"
+    ],
+    "matrix": [
+      [
+        7,
+        60,
+        10
+      ],
+      [
+        0,
+        177,
+        64
+      ],
+      [
+        1,
+        58,
+        123
+      ]
+    ]
+  },
+  "latency": {
+    "student_avg_latency_seconds": 0.0216,
+    "teacher_avg_latency_seconds": 1.8966,
+    "speedup": 87.86
+  }
+}

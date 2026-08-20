@@ -1,0 +1,52 @@
+{
+  "n_matched": 1496,
+  "accuracy": 0.5508,
+  "macro_precision": 0.6125,
+  "macro_recall": 0.4869,
+  "macro_f1": 0.4842,
+  "per_tier": {
+    "small": {
+      "precision": 0.7419,
+      "recall": 0.2026,
+      "f1": 0.3183,
+      "support": 227
+    },
+    "medium": {
+      "precision": 0.5665,
+      "recall": 0.4292,
+      "f1": 0.4884,
+      "support": 685
+    },
+    "large": {
+      "precision": 0.529,
+      "recall": 0.8288,
+      "f1": 0.6458,
+      "support": 584
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "small",
+      "medium",
+      "large"
+    ],
+    "matrix": [
+      [
+        46,
+        127,
+        54
+      ],
+      [
+        14,
+        294,
+        377
+      ],
+      [
+        2,
+        98,
+        484
+      ]
+    ]
+  },
+  "checkpoint": "runs_epoch20/route_only/seed_42/checkpoint-2000"
+}

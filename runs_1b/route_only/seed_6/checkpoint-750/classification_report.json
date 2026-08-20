@@ -1,0 +1,52 @@
+{
+  "n_matched": 1496,
+  "accuracy": 0.5735,
+  "macro_precision": 0.6343,
+  "macro_recall": 0.5082,
+  "macro_f1": 0.5112,
+  "per_tier": {
+    "small": {
+      "precision": 0.7727,
+      "recall": 0.2247,
+      "f1": 0.3481,
+      "support": 227
+    },
+    "medium": {
+      "precision": 0.5692,
+      "recall": 0.4745,
+      "f1": 0.5175,
+      "support": 685
+    },
+    "large": {
+      "precision": 0.5611,
+      "recall": 0.8253,
+      "f1": 0.6681,
+      "support": 584
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "small",
+      "medium",
+      "large"
+    ],
+    "matrix": [
+      [
+        51,
+        146,
+        30
+      ],
+      [
+        13,
+        325,
+        347
+      ],
+      [
+        2,
+        100,
+        482
+      ]
+    ]
+  },
+  "checkpoint": "runs_1b/route_only/seed_6/checkpoint-750"
+}

@@ -1,0 +1,52 @@
+{
+  "n_matched": 1496,
+  "accuracy": 0.5301,
+  "macro_precision": 0.5574,
+  "macro_recall": 0.4737,
+  "macro_f1": 0.4815,
+  "per_tier": {
+    "small": {
+      "precision": 0.6207,
+      "recall": 0.2379,
+      "f1": 0.3439,
+      "support": 227
+    },
+    "medium": {
+      "precision": 0.5354,
+      "recall": 0.4745,
+      "f1": 0.5031,
+      "support": 685
+    },
+    "large": {
+      "precision": 0.5162,
+      "recall": 0.7089,
+      "f1": 0.5974,
+      "support": 584
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "small",
+      "medium",
+      "large"
+    ],
+    "matrix": [
+      [
+        54,
+        118,
+        55
+      ],
+      [
+        27,
+        325,
+        333
+      ],
+      [
+        6,
+        164,
+        414
+      ]
+    ]
+  },
+  "checkpoint": "runs/reasoning_plus_route/seed_0/checkpoint-500"
+}

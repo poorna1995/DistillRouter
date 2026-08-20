@@ -1,0 +1,9 @@
+{
+  "routing_labels": [
+    "cheap",
+    "large"
+  ],
+  "lambda_route": 1.0,
+  "lambda_reason": 0.5,
+  "route_head_dropout": 0.1
+}

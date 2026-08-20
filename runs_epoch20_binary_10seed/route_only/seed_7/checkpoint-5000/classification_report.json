@@ -1,0 +1,38 @@
+{
+  "n_matched": 1496,
+  "accuracy": 0.637,
+  "macro_precision": 0.6721,
+  "macro_recall": 0.6709,
+  "macro_f1": 0.637,
+  "per_tier": {
+    "cheap": {
+      "precision": 0.822,
+      "recall": 0.5164,
+      "f1": 0.6343,
+      "support": 912
+    },
+    "large": {
+      "precision": 0.5222,
+      "recall": 0.8253,
+      "f1": 0.6397,
+      "support": 584
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "cheap",
+      "large"
+    ],
+    "matrix": [
+      [
+        471,
+        441
+      ],
+      [
+        102,
+        482
+      ]
+    ]
+  },
+  "checkpoint": "runs_epoch20_binary_10seed/route_only/seed_7/checkpoint-5000"
+}
