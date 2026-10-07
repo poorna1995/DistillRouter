@@ -19,16 +19,30 @@ _CANDIDATE_PROMPT_VERSION = HuggingFaceCandidate.PROMPT_VERSION
 
 
 def label_dataset(dataset_name: str, split: str = "calibration", limit: Optional[int] = None) -> dict:
-    """Writes labels to data/oracle/<dataset>/<split>.labels.jsonl."""
+    """Writes labels to data/oracle/<dataset>/<split>.labels.jsonl.
+
+    Merges with whatever's already in that file, keyed on query_id --
+    a `limit` smaller than (or just different from) a previous call's
+    never truncates labels already computed for queries outside this
+    call's slice. (Before this merge step existed, any --limit smaller
+    than an already-labeled split's size silently discarded every label
+    for the queries outside that slice -- the underlying per-attempt
+    cache below was never affected, only this aggregated output file.)
+    """
     processed_path = PROCESSED_DIR / dataset_name / f"{split}.jsonl"
     examples = read_jsonl(processed_path)
     if limit is not None:
         examples = examples[:limit]
 
+    output_path = ORACLE_DIR / dataset_name / f"{split}.labels.jsonl"
+    labels_by_id: dict[str, OracleLabel] = {}
+    if output_path.exists():
+        labels_by_id = {label.query_id: label for label in read_jsonl(output_path, OracleLabel)}
+    n_existing = len(labels_by_id)
+
     attempt_cache = CandidateAttemptCache(ORACLE_DIR / dataset_name / f"{split}.attempts.jsonl")
     loaded_candidates: dict[str, CandidateModel] = {}  # tier -> CandidateModel, populated on first real need
 
-    labels = []
     stats = {
         "cache_hits": 0,
         "new_attempts": 0,
@@ -74,16 +88,14 @@ def label_dataset(dataset_name: str, split: str = "calibration", limit: Optional
             stats["no_tier_succeeded"] += 1
 
         stats["labels_by_tier"][assigned_label] += 1
-        labels.append(
-            OracleLabel(
-                query_id=example.id,
-                dataset=dataset_name,
-                routing_label=assigned_label,
-                succeeded=succeeded,
-                small_correct=tier_correct["small"],
-                medium_correct=tier_correct["medium"],
-                large_correct=tier_correct["large"],
-            )
+        labels_by_id[example.id] = OracleLabel(
+            query_id=example.id,
+            dataset=dataset_name,
+            routing_label=assigned_label,
+            succeeded=succeeded,
+            small_correct=tier_correct["small"],
+            medium_correct=tier_correct["medium"],
+            large_correct=tier_correct["large"],
         )
         outcome = assigned_label if succeeded else f"{assigned_label} (no tier succeeded)"
         print(
@@ -91,5 +103,11 @@ def label_dataset(dataset_name: str, split: str = "calibration", limit: Optional
             flush=True,
         )
 
-    write_jsonl(ORACLE_DIR / dataset_name / f"{split}.labels.jsonl", labels)
+    write_jsonl(output_path, list(labels_by_id.values()))
+    print(
+        f"[{dataset_name}/{split}] done: {len(labels_by_id)} labels on disk "
+        f"({n_existing} pre-existing + {total} processed this call, {len(labels_by_id) - n_existing} new) "
+        f"-> {output_path} (cache hits={stats['cache_hits']}, new attempts={stats['new_attempts']}, "
+        f"by tier={stats['labels_by_tier']}, no tier succeeded={stats['no_tier_succeeded']})"
+    )
     return stats

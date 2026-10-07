@@ -44,7 +44,7 @@ def teacher_accuracy_vs_oracle(dataset_names: list[str], split: str, output_vers
             total_by_tier[oracle_label.routing_label] += 1
             correct_by_tier[oracle_label.routing_label] += int(is_correct)
 
-    return {
+    result = {
         "accuracy": round(correct / matched, 4) if matched else 0.0,
         "n_matched": matched,
         "n_oracle_labeled": oracle_total,
@@ -54,6 +54,12 @@ def teacher_accuracy_vs_oracle(dataset_names: list[str], split: str, output_vers
         },
         "per_tier_support": total_by_tier,
     }
+    print(
+        f"teacher_accuracy_vs_oracle({dataset_names}, split={split!r}): "
+        f"accuracy={result['accuracy']} ({matched}/{oracle_total} matched), "
+        f"per_tier={result['per_tier_accuracy']}"
+    )
+    return result
 
 
 def student_metrics_vs_oracle(
@@ -99,4 +105,8 @@ def student_metrics_vs_oracle(
 
     report = classification_metrics(y_true, y_pred, labels=list(target_labels) if target_labels else None)
     report["n_oracle_labeled"] = oracle_total
+    print(
+        f"student_metrics_vs_oracle(split={split!r}): accuracy={report.get('accuracy')}, "
+        f"macro_f1={report.get('macro_f1')} ({report.get('n_matched', 0)}/{oracle_total} matched)"
+    )
     return report

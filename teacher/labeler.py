@@ -84,6 +84,10 @@ def label_dataset(
         newly_labeled += 1
         print(f"{progress} -> {new_label.teacher_route} ({new_label.latency_seconds:.2f}s)", flush=True)
 
+    print(
+        f"[{dataset_name}/{split}] done: cache hits={cache_hits}, deduped={deduped}, "
+        f"newly labeled={newly_labeled} -> {output_path} ({len(cache)} total cached)"
+    )
     return {
         "cache_hits": cache_hits,
         "deduped": deduped,

@@ -76,19 +76,38 @@ class BaseDatasetLoader(ABC):
         Ends with an automated disjointness check (common/split_integrity.py);
         raises SplitLeakageError, uncaught, if it fails.
         """
+        print(f"[{self.name}] downloading/caching raw source into {self.raw_dir} ...")
         self.download()
+
         native = {split: self.load_native_split(split) for split in self.native_splits}
+        print(f"[{self.name}] loaded native splits: {{ {', '.join(f'{s}: {len(ex)}' for s, ex in native.items())} }}")
+
         canonical = self._to_canonical_splits(native)
+        if "validation" not in native:
+            print(
+                f"[{self.name}] no native validation split -- carved {len(canonical['validation'])} "
+                f"rows out of train (val_fraction={self.val_fraction}, seed={self.seed})"
+            )
+
         canonical, calibration_report = self._carve_calibration_split(canonical)
+        print(f"[{self.name}] carved calibration split: {calibration_report['calibration_size']} rows")
+
         capped, cap_report = self._cap_split_sizes(canonical)
+        print(f"[{self.name}] size caps applied: {cap_report['actual_counts']} (requested {cap_report['requested_caps']})")
 
         counts = {}
         for split, examples in capped.items():
             write_jsonl(self.processed_dir / f"{split}.jsonl", examples)
             counts[split] = len(examples)
+        print(f"[{self.name}] wrote processed splits -> {self.processed_dir}: {counts}")
 
         self._write_sample_manifest({**cap_report, **calibration_report})
-        check_dataset_splits(self.name)
+        # self.processed_dir already has self.name appended (see __init__); check_dataset_splits
+        # appends dataset_name itself, so pass the parent -- otherwise this always validates
+        # PROCESSED_DIR/<name> (the default) instead of wherever this loader instance actually
+        # just wrote to, silently vacuous for a loader constructed with a custom processed_dir.
+        check_dataset_splits(self.name, self.processed_dir.parent)  # prints its own confirmation, raises on leakage
+        print(f"[{self.name}] prepare() complete: {counts}")
         return counts
 
     def _to_canonical_splits(self, native: dict[str, list[Example]]) -> dict[str, list[Example]]:

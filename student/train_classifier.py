@@ -324,6 +324,7 @@ def save_classifier_checkpoint(
         "routing_labels": list(model.routing_labels),
         "route_head_dropout": model.route_head[3].p,
     }, indent=2))
+    print(f"  checkpoint saved -> {checkpoint_dir}")
 
 
 def load_classifier_checkpoint(checkpoint_dir: str) -> tuple[ClassifierRouter, PreTrainedTokenizerBase]:
@@ -342,6 +343,7 @@ def load_classifier_checkpoint(checkpoint_dir: str) -> tuple[ClassifierRouter, P
     model.route_head.load_state_dict(route_head_state)
     model.to("cuda")
     model.eval()
+    print(f"Loaded classifier checkpoint from {checkpoint_dir} (routing_labels={model.routing_labels})")
     return model, tokenizer
 
 

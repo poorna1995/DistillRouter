@@ -158,10 +158,13 @@ def select_best_router_checkpoint(
     (classifier) and Experiment 2 (dual-head) checkpoints. Doesn't
     freeze/copy anything -- see evaluation/metrics.py's
     freeze_checkpoint() for that."""
-    checkpoint_dirs = sorted(
-        (p for p in Path(checkpoint_root).glob("checkpoint-*") if p.is_dir()),
-        key=lambda p: int(p.name.split("-")[-1]),
-    )
+    all_dirs = [p for p in Path(checkpoint_root).glob("checkpoint-*") if p.is_dir()]
+    numbered, skipped = [], []
+    for p in all_dirs:
+        (numbered if p.name.split("-")[-1].isdigit() else skipped).append(p)
+    if skipped:
+        print(f"select_best_router_checkpoint: skipping non-standard checkpoint dir(s): {[p.name for p in skipped]}")
+    checkpoint_dirs = sorted(numbered, key=lambda p: int(p.name.split("-")[-1]))
     if not checkpoint_dirs:
         raise FileNotFoundError(f"No checkpoint-<step> directories found under {checkpoint_root}")
 

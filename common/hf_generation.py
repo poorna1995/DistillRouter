@@ -19,8 +19,10 @@ class GenerationResult:
 
 def load_causal_lm(model_id: str) -> tuple[PreTrainedTokenizerBase, PreTrainedModel]:
     """Load a tokenizer + causal LM onto GPU. The expensive, one-time part."""
+    print(f"Loading {model_id} ...", flush=True)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id, dtype=torch.bfloat16).to("cuda")
+    print(f"Loaded {model_id} onto {model.device}")
     return tokenizer, model
 
 

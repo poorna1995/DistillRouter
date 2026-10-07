@@ -5,7 +5,7 @@
 \item {\bf Claims}
     \item[] Question: Do the main claims made in the abstract and introduction accurately reflect the paper's contributions and scope?
     \item[] Answer: \answerYes{}
-    \item[] Justification: The abstract and Section~1's three contributions state exactly what is tested (route-only vs.\ reasoning-plus-route distillation, Section~3.3), the metrics used (transfer fidelity and macro-F1, Section~4.4), and the qualifying scope (two student backbones, one teacher configuration, two math datasets), matching the results in Section~5 and the limitations in Section~7.
+    \item[] Justification: The abstract and Section~\ref{sec:intro}'s three contributions state exactly what is tested (route-only vs.\ reasoning-plus-route distillation, Sections~\ref{sec:route-only}--\ref{sec:reasoning-plus-route}), the metrics used (policy transfer and routing accuracy, both accuracy and macro-F1, Section~\ref{sec:evaluation_metrics}), and the qualifying scope (two student backbones, one teacher configuration, two math datasets), matching the results in Section~\ref{sec:results} and the limitations in Section~\ref{sec:limitations}.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the abstract and introduction do not include the claims made in the paper.
@@ -17,7 +17,7 @@
 \item {\bf Limitations}
     \item[] Question: Does the paper discuss the limitations of the work performed by the authors?
     \item[] Answer: \answerYes{}
-    \item[] Justification: Section~7 (Limitations) lists six specific limitations: only two student scales tested, single teacher configuration, limited robustness/multi-seed analysis (including the loss-weighting sweep not being re-run per seed or per scale), a fidelity-correctness reversal that is directionally consistent across seeds but not statistically reliable, domain specificity to mathematical reasoning, and the restricted scope of reasoning supervision studied.
+    \item[] Justification: Section~\ref{sec:limitations} lists four specific limitations: domain specificity to mathematical reasoning benchmarks, reliance on a single non-frontier teacher configuration, only two distilled-router backbone sizes tested, and reasoning studied exclusively as a training-time supervision signal.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper has no limitation while the answer \answerNo{} means that the paper has limitations, but those are not discussed in the paper. 
@@ -47,7 +47,7 @@
     \item {\bf Experimental result reproducibility}
     \item[] Question: Does the paper fully disclose all the information needed to reproduce the main experimental results of the paper to the extent that it affects the main claims and/or conclusions of the paper (regardless of whether the code and data are provided or not)?
     \item[] Answer: \answerYes{}
-    \item[] Justification: Section~3 describes the oracle/teacher/student pipeline in full, Section~4 specifies datasets, splits, models, and hyperparameters (learning rate, batch size, epochs, optimizer, precision, hardware), and Section~6 reports the loss-weighting sweep and the exact seeding fix applied to Variant~2, together sufficient to reconstruct every reported number.
+    \item[] Justification: Section~\ref{sec:problem_formulation} defines the oracle labels and routing label spaces, Section~\ref{sec:methodology} specifies the teacher and distilled-router architecture and training objectives, and Section~\ref{sec:experimental-setup} defines the datasets and label spaces used, with split sizes, candidate models, and training hyperparameters (learning rate, batch size, epochs, optimizer, precision, hardware) detailed in Appendix~\ref{sec:splits-appendix}--\ref{sec:training-protocol}; Appendix~\ref{sec:loss-weighting}--\ref{sec:epoch-count} additionally report the loss-weight sweep and the seeding fix that motivated the 10-seed protocol, together sufficient to reconstruct every reported number.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not include experiments.
@@ -67,7 +67,7 @@
 \item {\bf Open access to data and code}
     \item[] Question: Does the paper provide open access to the data and code, with sufficient instructions to faithfully reproduce the main experimental results, as described in supplemental material?
     \item[] Answer: \answerNo{}
-    \item[] Justification: GSM8K and MATH (Section~4.1) are public benchmarks, but the oracle-labeling, teacher-prompting, and student-training code, together with the teacher-generated training data, are not yet released alongside this submission; Section~4 documents the procedure in enough detail to reimplement it in the interim.
+    \item[] Justification: GSM8K and MATH (Section~\ref{sec:datasets}) are public benchmarks, but the oracle-labeling, teacher-prompting, and student-training code, together with the teacher-generated training data, are not yet released alongside this submission; Sections~\ref{sec:methodology}--\ref{sec:experimental-setup} and their appendix extensions (\ref{sec:teacher-config-appendix}--\ref{sec:training-protocol}) document the procedure in enough detail to reimplement it in the interim.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that paper does not include experiments requiring code.
@@ -84,7 +84,7 @@
 \item {\bf Experimental setting/details}
     \item[] Question: Does the paper specify all the training and test details (e.g., data splits, hyperparameters, how they were chosen, type of optimizer) necessary to understand the results?
     \item[] Answer: \answerYes{}
-    \item[] Justification: Section~4.1 gives split sizes (Table~2) and answer-extraction rules; Section~4.3 gives the optimizer, learning rate, batch size, epoch count, precision, and hardware; Section~4.3--4.4 state that checkpoint selection used validation macro-F1 only, with the test split touched exactly once (Section~5.3).
+    \item[] Justification: Section~\ref{sec:datasets} states the answer-extraction rules and points to split sizes (Appendix Table~\ref{tab:splits}); Appendix~\ref{sec:training-protocol} gives the optimizer, learning rate, batch size, epoch count, precision, and hardware, and states that checkpoint selection used validation macro-F1 only, with the test split evaluated exactly once.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not include experiments.
@@ -95,7 +95,7 @@
 \item {\bf Experiment statistical significance}
     \item[] Question: Does the paper report error bars suitably and correctly defined or other appropriate information about the statistical significance of the experiments?
     \item[] Answer: \answerYes{}
-    \item[] Justification: Table~4 reports mean $\pm$ SD across ten independently seeded training runs per variant (Section~5.3), and the same ten seeds are used for a paired bootstrap (10,000 resamples) over both the teacher-fidelity comparison (Table~4) and the oracle-correctness comparison (Table~5), each reported with a 95\% CI and an explicit statement of whether that CI excludes zero. Section~5.5 repeats the identical ten-seed protocol at a second student backbone, again with paired-bootstrap CIs, and Section~5.6 repeats the oracle-correctness comparison at that same second backbone (Table~10), again with a paired-bootstrap CI. Section~6.2 additionally reports the two-seed parameter-initialization spread (0.023 macro-F1) that originally motivated moving to a multi-seed protocol. The source of variability (training seed, resampled via paired bootstrap) and the method (paired bootstrap over seeds, and separately over pooled test queries) are stated in Section~5.3; error bars in Tables~4--6 are sample standard deviations across seeds, not standard errors.
+    \item[] Justification: Table~\ref{tab:main270m} reports mean $\pm$ SD across ten independently seeded training runs per variant and configuration (Section~\ref{sec:training-protocol}), and the same ten seeds are used for a paired bootstrap~\citep{koehn2004statistical} on the route-only-vs.-reasoning-plus-route macro-F1 difference, reported with a 95\% CI and an explicit statement of whether that CI excludes zero (Table~\ref{tab:main270m}). This identical protocol is applied across all four configurations (two label spaces $\times$ two backbone scales, Section~\ref{sec:effect-of-scale}), not just the primary one. Appendix~\ref{sec:seed-variance} additionally reports the parameter-initialization seed spread (0.023 macro-F1 between nominally identical runs) that motivated the 10-seed protocol, and Appendix~\ref{sec:epoch-count} reports a further paired seed-by-seed bootstrap when checking robustness to training-epoch count. All reported error bars are sample standard deviations across the 10 seeds, not standard errors.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not include experiments.
@@ -112,7 +112,7 @@
 \item {\bf Experiments compute resources}
     \item[] Question: For each experiment, does the paper provide sufficient information on the computer resources (type of compute workers, memory, time of execution) needed to reproduce the experiments?
     \item[] Answer: \answerYes{}
-    \item[] Justification: Section~4.3 states both variants trained on a single NVIDIA GB10 GPU for 3 epochs at batch size 8 in bf16; Section~4.4 and Table~4 report per-query inference latency measured on the same GPU. We do not report a total-project compute estimate including preliminary or failed runs.
+    \item[] Justification: Section~\ref{sec:training-protocol} states both variants trained on a single NVIDIA GB10 GPU for 3 epochs at batch size 8 in bf16; Section~\ref{sec:efficiency} and Table~\ref{tab:mainperf} report per-query inference latency measured on the same GPU. We do not report a total-project compute estimate including preliminary or failed runs.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not include experiments.
@@ -162,7 +162,7 @@
 \item {\bf Licenses for existing assets}
     \item[] Question: Are the creators or original owners of assets (e.g., code, data, models), used in the paper, properly credited and are the license and terms of use explicitly mentioned and properly respected?
     \item[] Answer: \answerNo{}
-    \item[] Justification: Section~4.1--4.2 cites the origin of every dataset and model used (GSM8K \citep{cobbe2021training}, MATH \citep{hendrycks2021measuring}, Gemma-3, Qwen2.5), but the paper does not state each asset's license terms explicitly; we have not independently re-verified and reproduced those terms here.
+    \item[] Justification: Section~\ref{sec:datasets} cites the origin of every dataset and model used (GSM8K \citep{cobbe2021training}, MATH \citep{hendrycks2021measuring}, Gemma-3, Qwen2.5), but the paper does not state each asset's license terms explicitly; we have not independently re-verified and reproduced those terms here.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not use existing assets.
@@ -178,7 +178,7 @@
 \item {\bf New assets}
     \item[] Question: Are new assets introduced in the paper well documented and is the documentation provided alongside the assets?
     \item[] Answer: \answerNA{}
-    \item[] Justification: The paper does not release a new dataset, model, or code artifact alongside this submission; the teacher-generated training data and trained student checkpoints described in Sections~3--4 are not yet packaged for release.
+    \item[] Justification: The paper does not release a new dataset, model, or code artifact alongside this submission; the teacher-generated training data and trained student checkpoints described in Sections~\ref{sec:problem_formulation}--\ref{sec:methodology} are not yet packaged for release.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the paper does not release new assets.
@@ -214,7 +214,7 @@
     \item[] Question: Does the paper describe the usage of LLMs if it is an important, original, or non-standard component of the core methods in this research? Note that if the LLM is used only for writing, editing, or formatting purposes and does \emph{not} impact the core methodology, scientific rigor, or originality of the research, declaration is not required.
     %this research?
     \item[] Answer: \answerYes{}
-    \item[] Justification: LLMs are a core, original methodological component of this research, not just a writing aid: the teacher itself is a prompted LLM (Section~3.2) whose reasoning and routing decisions are the supervisory signal being distilled, and both student variants (Section~3.3) fine-tune a pretrained decoder-only LLM backbone.
+    \item[] Justification: LLMs are a core, original methodological component of this research, not just a writing aid: the teacher itself is a prompted LLM (Sections~\ref{sec:teacher-routing}, \ref{sec:teacher-policy}) whose reasoning and routing decisions are the supervisory signal being distilled, and the distilled router (Section~\ref{sec:student-router}) fine-tunes a pretrained decoder-only LLM backbone.
     \item[] Guidelines:
     \begin{itemize}
         \item The answer \answerNA{} means that the core method development in this research does not involve LLMs as any important, original, or non-standard components.

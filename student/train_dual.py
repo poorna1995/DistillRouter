@@ -128,7 +128,10 @@ class DualHeadRouter(nn.Module):
 
         reason_loss = None
         if labels is not None:
-            shift_logits = lm_logits[..., :-1, :].contiguous()
+            # .float() upcast before cross_entropy, same as route_loss's pooled hidden state
+            # below and standard HF causal-LM practice -- bf16 cross-entropy over a
+            # 262,144-token vocabulary loses precision in the log-softmax normalization otherwise.
+            shift_logits = lm_logits[..., :-1, :].float().contiguous()
             shift_labels = labels[..., 1:].contiguous()
             reason_loss = F.cross_entropy(
                 shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1), ignore_index=-100
@@ -418,6 +421,7 @@ def save_dual_checkpoint(model: DualHeadRouter, tokenizer: PreTrainedTokenizerBa
         "lambda_reason": model.lambda_reason,
         "route_head_dropout": model.route_head[3].p,
     }, indent=2))
+    print(f"  checkpoint saved -> {checkpoint_dir}")
 
 
 def load_dual_head_checkpoint(checkpoint_dir: str) -> tuple[DualHeadRouter, PreTrainedTokenizerBase]:
@@ -438,6 +442,7 @@ def load_dual_head_checkpoint(checkpoint_dir: str) -> tuple[DualHeadRouter, PreT
     model.route_head.load_state_dict(route_head_state)
     model.to("cuda")
     model.eval()
+    print(f"Loaded dual-head checkpoint from {checkpoint_dir} (routing_labels={model.routing_labels})")
     return model, tokenizer
 
 

@@ -528,7 +528,11 @@ plt.close(fig)
 # ---------------------------------------------------------------------------
 cq_points = [
     # label,                    cost_ms, acc,   color,  marker
-    ("Always Small",            4390,    0.045, GRAY,   "D"),
+    # Note: "Always Small" (4390ms, 0.045 acc) was dropped -- it never
+    # appeared in Table 3 or the surrounding prose (which only discusses
+    # Always-Medium/Always-Large), so plotting it created an untabulated,
+    # unexplained baseline. Re-add only alongside a matching table row
+    # and prose mention if it's reinstated.
     ("Always Medium",           4683,    0.336, GRAY,   "D"),
     ("Always Large",            10226,   0.456, GRAY,   "D"),
     ("Teacher Router",          8550,    0.392, "#8a8a86", "*"),
@@ -543,7 +547,6 @@ ax.text(4300, 0.542 + 0.010, "oracle ceiling (0.542)", color="#6b6a64", fontsize
         va="bottom", ha="left")
 
 label_offsets = {
-    "Always Small":        (0, -14),
     "Always Medium":       (0, 12),
     "Always Large":        (0, 12),
     "Teacher Router":      (18, -16),

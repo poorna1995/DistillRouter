@@ -8,6 +8,7 @@
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{hyperref}
+\hypersetup{breaklinks=true}
 \usepackage{url}
 \usepackage{booktabs}
 \usepackage{multirow}
@@ -34,69 +35,58 @@
 \maketitle
 
 \begin{abstract}
-LLM routing improves the cost-performance tradeoff of large-scale LLM serving by directing queries to the least expensive capable model. However, routing itself incurs inference overhead, and increasingly sophisticated routers can become deployment bottlenecks. We propose DistillRouter, a routing-policy distillation framework that transfers routing policy from an expensive teacher router to a lightweight student router. DistillRouter converts routing into a supervised classification problem, enabling deployment through a single forward pass while preserving routing quality. We evaluate DistillRouter on GSM8K and MATH under both binary and three-way routing settings using multiple student model scales. Across all configurations, distilled routers achieve routing accuracy comparable to or better than the teacher while reducing routing latency by up to 150×. We further investigate reasoning-augmented supervision and find that although reasoning traces improve policy transfer at larger model scales, they do not consistently improve routing correctness. Our results demonstrate that routing policies can be effectively compressed into compact models, providing an efficient and practical solution for large-scale LLM serving.
+LLM routing improves the cost-performance tradeoff of large-scale LLM serving by directing queries to the least expensive capable model. However, routing to an appropriate model with balanced  inference cost trade become deployment bottlenecks. We propose DistillRouter, a routing-policy distillation framework that transfers routing policy from an expensive teacher router to a lightweight distilled router. DistillRouter converts routing signals into a supervised classification problem, enabling deployment through a single forward pass while preserving routing quality. We evaluate DistillRouter on GSM8K and MATH under both binary and three-label routing settings using multiple distilled-router backbone scales. Across all configurations, distilled routers achieve routing accuracy comparable to or better than the teacher while reducing routing latency by up to 153×. We further investigate reasoning-augmented supervision and find that although reasoning traces are associated with improved policy transfer at larger model scales, this improvement is not consistently associated with better routing correctness. Our results indicate that routing policies can be effectively compressed into compact models, suggesting a practical approach for reducing routing overhead in large-scale LLM serving.
 \end{abstract}
 
 \section{Introduction}
 \label{sec:intro}
 
-Large Language Models (LLMs) have become a foundational component of modern AI systems, enabling applications such as conversational assistants, customer-support agents, coding assistants, search systems, and enterprise copilots. Their ability to perform a wide range of language understanding and generation tasks has led to rapid adoption across both consumer and enterprise settings. However, deploying LLMs at scale remains challenging because inference cost and latency grow substantially with model size. In practice, many production systems must process large numbers of user queries while operating under strict cost and responsiveness constraints.
-A fundamental characteristic of LLM workloads is that query difficulty is highly heterogeneous. While some requests require complex reasoning and benefit from powerful frontier models, many others can be answered correctly by smaller and less expensive models. Consequently, routing every query to the most capable model often wastes computational resources and increases serving costs. This observation has motivated the development of LLM routing, where a router dynamically selects the model expected to provide the best cost-performance trade-off for a given query. By sending simple queries to inexpensive models and reserving larger models for more challenging requests, routing systems can substantially reduce serving costs while maintaining response quality. Recent work has demonstrated the effectiveness of routing in improving deployment efficiency across diverse LLM systems.
-Despite these benefits, routing introduces a new deployment challenge. Determining which model should answer a query is itself an inference problem. Existing routing approaches learn routing policies from preference data, reward signals, or reinforcement learning and often rely on additional models to predict routing decisions. For example, RouteLLM learns routing policies from preference data, while Router-R1 instantiates the router itself as a capable LLM that performs reasoning and routing actions during inference. Although such approaches improve routing accuracy, they also introduce additional computational overhead that is incurred for every incoming query. In large-scale deployments, the router therefore becomes part of the serving pipeline and can reduce some of the efficiency gains that routing is intended to provide.
+Large Language Models (LLMs) now underpin a wide range of applications, from conversational assistants and coding tools to search and enterprise copilots. Because inference cost and latency scale with model size, production systems serving large query volumes face mounting pressure to control both under tight responsiveness constraints.
 
-This observation raises an important question:
+LLM workloads are highly heterogeneous in difficulty: some queries demand a frontier-scale model's reasoning, while many others are answered just as well by a much smaller one. Sending every query to the most capable model therefore wastes compute and inflates serving cost. LLM routing addresses this by dynamically directing each query to the cheapest model expected to answer it correctly, substantially reducing cost while preserving response quality.
+
+Routing itself, however, introduces a new inference problem: deciding which model should answer a query. Existing approaches learn this policy from preference data, reward signals, or reinforcement learning, and the router that makes this decision varies widely in cost — from a lightweight classifier to a full LLM that reasons over each routing decision at inference time~\citep{ong2024routellm,zhang2025routerr1} (Appendix~\ref{sec:related-work} surveys these approaches in detail). Such approaches can improve routing accuracy, but when the router is itself a large, expensive model, it reintroduces the very inference cost routing is meant to avoid — the router's own decision-making now adds latency and compute to every incoming query.
+
+This raises a natural question:
 \begin{quote}
-    \textbf{\textit{Can routing policy learned from expensive model be compressed into a lightweight model.}}
-
+\textbf{\textit{Can the routing policy learned by an expensive model be compressed into a lightweight model?}}
 \end{quote}
 
-Knowledge distillation offers a natural solution. Rather than deploying a computationally expensive router online, an accurate teacher router can be used offline to generate supervision for a smaller student router. The student router learns the routing policy during training and subsequently performs routing through a single forward pass at inference time. If successful, this shifts computational effort from deployment to training while retaining the benefits of a high-quality routing policy.
 
-In this paper, we propose DistillRouter, a framework for building efficient LLM routers through knowledge distillation. We formulate routing as a routing-policy learning problem and transfer a routing policy from an expensive teacher router to a compact student router. We investigate two distillation strategies. The first, route-only distillation, transfers the teacher's routing decisions directly. The second, reasoning-augmented distillation, augments routing supervision with teacher-generated reasoning traces as an auxiliary training signal while maintaining identical deployment cost. This formulation enables a controlled study of whether richer supervision improves routing-policy distillation.
+Knowledge distillation~\citep{hinton2015distilling} provides a direct mechanism for this: a teacher model's behavior is used to supervise a smaller student model, which learns to approximate the teacher's function without inheriting its computational cost. Applied to routing, an expensive teacher router is queried offline over a large set of training queries to produce routing decisions; these decisions serve as training labels for a compact distilled router, which learns to reproduce the teacher's routing policy and performs routing through a single forward pass at deployment time. This confines the teacher's cost to an offline labeling step, so only the lightweight distilled router is queried at inference. 
 
-We evaluate DistillRouter across two benchmarks. Our results show that routing policies can be effectively compressed through distillation, producing student routers that substantially reduce inference latency while maintaining strong routing accuracy. We further study the role of reasoning supervision and analyze routing behavior using both policy-transfer and oracle-label evaluations.
+We introduce DistillRouter, a framework that transfers a routing policy from an expensive teacher to a compact distilled router. We study two distillation strategies: route-only distillation, which transfers the teacher's routing decisions directly, and reasoning-plus-route distillation, which additionally supervises the router with teacher-generated reasoning traces as an auxiliary training signal, at no extra deployment cost. Comparing the two isolates whether richer supervision improves distillation.
+
+Evaluated on two benchmarks, DistillRouter compresses routing policies into models that reduces inference latency while matching the teacher's routing accuracy. We study the role of reasoning supervision throughout, evaluating both how closely a distilled router imitates its teacher and how well it performs against independent oracle labels. Our contributions are:
 \begin{itemize}
-    \item \textbf{DistillRouter:} We propose a knowledge-distillation framework for compressing expensive LLM routing policies into lightweight deployable routers.
-    \item \textbf{Efficient Routing via Distillation:} We demonstrate that routing policies can be effectively transferred to compact student routers, significantly reducing routing overhead while preserving strong routing accuracy.
-    \item \textbf{Understanding Reasoning Supervision:} We provide an empirical study of reasoning-augmented routing-policy distillation and show that improved policy transfer does not necessarily imply improved routing accuracy.
+\item \textbf{DistillRouter:} a knowledge-distillation framework for compressing expensive LLM routing policies into lightweight, deployable routers.
+\item \textbf{Efficient Routing via Distillation:} distilled routers transfer routing policy effectively, cutting overhead while matching or exceeding the teacher's routing accuracy.
+\item \textbf{Understanding Reasoning Supervision:} an empirical study showing that reasoning supervision improves policy transfer only at larger model scales.
 \end{itemize}
-
-
-\section{Related Work}
-\label{sec:related-work}
-
-\paragraph{LLM Routing.} LLM routing aims to reduce inference cost by selecting the most appropriate model for each query. Recent work has shown that routing can significantly improve cost-quality tradeoffs compared to always using the most capable model. RouteLLM\citep{ong2024routellm} learns lightweight routers from human preference data and dynamically selects between stronger and weaker models at inference time. ZOOTER\citep{lu2024zooter}uses reward-model signals to train routing functions that dispatch queries to expert models. More recently, Router-R1\citep{zhang2025routerr1} formulates routing as a sequential decision-making problem and trains an LLM router through reinforcement learning, interleaving reasoning and routing actions.
-While these approaches focus on improving routing decisions, they still require deploying a router at inference time. In contrast, we study whether an expensive routing policy can be compressed into a lightweight deployable router through knowledge distillation.
-
-\paragraph{Routing Distillation and Reasoning Supervision.}
-
-Knowledge distillation is widely used to transfer capabilities from large models to smaller ones. In LLM routing, however, prior work primarily learns routing functions from preference labels, reward signals, or reinforcement-learning objectives rather than explicitly distilling a routing policy from a larger teacher router.
-Reasoning has also been explored as a mechanism for improving LLM decision making. In routing systems such as Router-R1, reasoning is generated during inference and contributes directly to routing decisions. By contrast, we investigate reasoning as a training-time-only auxiliary supervisory signal that is discarded at deployment. This allows us to study whether reasoning improves routing-policy transfer without increasing inference cost.
-
 \section{Problem Formulation}
 \label{sec:problem_formulation}
 
 Consider a routing environment consisting of a set of candidate language models
 \[
-  \mathcal{M} = \{m_1, m_2, m_3\},
+\mathcal{M} = \{m_1, m_2, m_3\},
 \]
-ordered by increasing parameter count, capability, and serving cost. Given an incoming user query $x$, the goal of the routing system is to predict an appropriate routing label
+ordered by increasing parameter count, capability, and serving cost. Given an incoming user query $x$, the goal of the routing system is to predict an appropriate routing decision
 \[
-  y \in \mathcal{Y},
+y \in \mathcal{Y},
 \]
-that determines which model category should process the query. The routing objective is to assign each query to the least expensive model category capable of producing a correct answer. Routing labels therefore reflect the capability level required to answer a query correctly: queries that can be handled by lower-cost models should be assigned lower-cost routing labels, while more challenging queries should be assigned higher-capability routing labels.
+that determines which model category should process the query. The routing objective is to assign each query to the least expensive model category capable of producing a correct answer. Routing decisions therefore reflect the capability level required to answer a query correctly: queries that can be handled by lower-cost models should be assigned lower-cost routing decisions, while more challenging queries should be assigned higher-capability routing decisions.
 
 An expensive \emph{teacher router} defines a routing policy
 \[
-  \pi_T(y \mid x),
+\pi_T(y \mid x),
 \]
-which maps queries to routing decisions. The teacher may employ larger language models, multi-stage prompting, or explicit reasoning to determine the appropriate routing label. Our objective is to learn a lightweight \emph{student router}
+which maps queries to routing decisions. The teacher may employ larger language models, multi-stage prompting, or explicit reasoning to determine the appropriate routing decision. Our objective is to learn a lightweight \emph{distilled router}
 \[
-  \pi_\theta(y \mid x),
+\pi_\theta(y \mid x),
 \]
 that approximates the teacher's routing policy while operating at substantially lower inference cost. Formally, the problem addressed in this work is:
 \begin{quote}
-  \emph{Given an expensive routing policy $\pi_T$, can we learn a compact routing policy $\pi_\theta$ that preserves routing accuracy while significantly reducing routing latency and computational overhead?}
+\emph{Given an expensive routing policy $\pi_T$, can we learn a lightweight routing policy $\pi_\theta$ that preserves routing accuracy while significantly reducing routing latency and computational overhead?}
 \end{quote}
 
 \textsc{DistillRouter} is independent of the specific routing label space. In this work, we evaluate two routing settings.
@@ -105,76 +95,73 @@ that approximates the teacher's routing policy while operating at substantially 
 
 Our primary configuration uses a binary label space
 \[
-  \mathcal{Y}_{\text{binary}} = \{\texttt{small}, \texttt{large}\}.
+\mathcal{Y}_{\text{binary}} = {{\texttt{small}, \texttt{large}}}.
 \]
 Here, the \texttt{small} label represents queries whose cheapest correct assignment belongs to either the $m_1$ or $m_2$ category, while \texttt{large} represents queries that require the $m_3$ category. This formulation focuses on the key routing distinction between queries that can be handled by lower-cost models and those requiring the highest-capability model.
 
-\subsection{Three-Way Routing}
+\subsection{Three-Label Routing}
 
 To evaluate finer-grained routing decisions, we additionally consider
 \[
-  \mathcal{Y}_{\text{3way}} = \{\texttt{small}, \texttt{medium}, \texttt{large}\}.
+\mathcal{Y}_{\text{3label}} = {{\texttt{small}, \texttt{medium}, \texttt{large}}}.
 \]
-In this setting, the router directly predicts the model category assigned to a query, enabling more precise model selection across the candidate pool. The binary and three-way settings evaluate different levels of routing granularity: binary routing measures whether the router can distinguish between lower-cost and highest-capability model categories, whereas three-way routing evaluates whether the router can accurately differentiate among all available model categories.
-
+In this setting, the router directly predicts the model assigned to a query, enabling more precise model selection across the candidate pool. The binary and three-label settings evaluate different levels of routing granularity: binary routing measures whether the router can distinguish between lower-cost and highest-capability model categories, whereas three-label routing evaluates whether the router can accurately differentiate among all available model categories.
 \subsection{Oracle Labels}
 \label{sec:oracle-routing-policy}
 
-For each query, the oracle label is defined as the smallest model tier that produces the correct answer under our evaluation protocol. Specifically, given the candidate model set $\{m_1, m_2, m_3\}$, we execute all candidate models and assign the query to the least expensive model whose output matches the reference answer. If only the largest model answers correctly, the oracle label is \texttt{large}; if both $m_1$ and $m_2$ answer correctly, the oracle label is \texttt{small}. These oracle labels represent the optimal cost-aware routing decision for each query. Oracle labels are used exclusively for evaluation and provide an independent measure of routing accuracy — they are never used for training.
-
+For each query, the oracle label is defined as the smallest model category that produces the correct answer under our evaluation protocol. Specifically, given the candidate model set $\{m_1, m_2, m_3\}$, we execute all candidate models and assign the query to the least expensive model whose output matches the reference answer. If only the largest model answers correctly, the oracle label is \texttt{large}; if both $m_1$ and $m_2$ answer correctly, the oracle label is \texttt{small}. These oracle labels represent the optimal cost-aware routing decision for each query. Oracle labels are used exclusively for evaluation and provide an independent measure of routing accuracy — they are never used for training.
 \section{Methodology}
 \label{sec:methodology}
 
 \subsection{DistillRouter Framework}
 \label{sec:distillrouter_framework}
 
-The goal of DistillRouter is to reduce the deployment overhead of LLM routing by transferring a routing policy from an expensive teacher router to a lightweight student router. Given a user query $x$, the teacher router estimates the minimum model category required to answer the query and generates supervisory signals for training. The student router then learns this routing policy and replaces the teacher at deployment time. DistillRouter consists of two stages: \textbf{teacher-policy generation}, in which an expensive teacher router processes training queries and generates routing supervision, optionally including teacher reasoning traces that explain its routing decision; and \textbf{routing-policy distillation}, in which a student router is trained to predict the teacher's routing labels. After training, only the student router is deployed, enabling routing through a single forward pass. The overall objective is to preserve routing accuracy while significantly reducing routing latency and computational cost.
+DistillRouter transfers a routing policy from an expensive teacher router to a lightweight distilled router. Given a query $x$, the teacher estimates the least expensive model category required to answer it and generates supervision for training; the distilled router then learns this policy and replaces the teacher at deployment time. The pipeline has two stages: \textbf{teacher-policy generation}, where the teacher processes training queries and produces routing supervision, optionally including reasoning traces that explain its decision; and \textbf{policy transfer}, where the distilled router is trained to predict the teacher's labels. Only the distilled router is deployed, performing routing in a single forward pass: latency and compute drop substantially, while routing accuracy is preserved or improved relative to the teacher.
 
 \subsection{Routing-Policy Distillation}
 \label{sec:distillation}
 
-Let $x \in \mathcal{X}$ denote a query and let $\mathcal{Y} = \{\texttt{small}, \texttt{medium}, \texttt{large}\}$ denote the routing label space. Given a teacher routing policy $\pi_T(y \mid x)$, DistillRouter learns a student routing policy $\pi_\theta(y \mid x)$ that approximates it, $\pi_\theta(y \mid x) \approx \pi_T(y \mid x)$. The student router is trained using teacher-generated supervision and subsequently performs routing without requiring the teacher router at inference time.
+Let $x \in \mathcal{X}$ be a query and $\mathcal{Y}$ the routing label space defined in Section~\ref{sec:problem_formulation} (either $\mathcal{Y}_{\text{binary}}$ or $\mathcal{Y}_{\text{3label}}$). Given a teacher policy $\pi_T(y \mid x)$, DistillRouter learns $\pi_\theta(y \mid x) \approx \pi_T(y \mid x)$ from teacher-generated supervision; once trained, the distilled router routes without consulting the teacher.
 
 \subsection{Teacher Router}
 \label{sec:teacher-routing}
-\label{sec:teacher_routing_policy}
 
-The teacher router serves as the source of routing supervision. For each query $x$, the teacher performs two sequential steps. First, \emph{reasoning generation}: the teacher analyzes the query and generates a reasoning trace $r = f_{\text{reason}}(x)$ summarizing the characteristics of the query. These reasoning traces are used only as training supervision and are never used during deployment. Second, \emph{routing prediction}: conditioned on the query, the generated reasoning trace, and a set of calibration demonstrations $D_{cal}$, the teacher predicts a routing label $y = f_{\text{route}}(x, r, D_{cal})$ corresponding to the model category predicted to be sufficient for answering the query. Applying the teacher router across the training corpus produces a routing dataset $D_T = \{(x_i, y_i, r_i)\}_{i=1}^{N}$, where $x_i$ is the query, $y_i$ is the routing label, and $r_i$ is the teacher reasoning trace. This dataset provides the supervision used for routing-policy distillation.
+The teacher supplies routing supervision in two sequential steps. First, \emph{reasoning generation}: it analyzes the query and produces a reasoning trace $r = f_{\text{reason}}(x)$ describing the query's characteristics; these traces supervise training only and are never used at deployment. Second, \emph{routing prediction}: conditioned on the query, the trace, and few shot examples, it predicts a routing label $y = f_{\text{route}}(x, r)$, the model category expected to suffice. Applying this across the training corpus yields $D_T = \{(x_i, y_i, r_i)\}_{i=1}^{N}$, the supervision used for distillation.
 
-\subsection{Student Router}
+\subsection{Distilled Router}
 \label{sec:student-router}
 
-The student router is initialized from a pretrained language-model backbone. Given a query $x = (t_1, \ldots, t_n)$, the transformer backbone produces contextual hidden representations $H = (h_1, \ldots, h_n)$. Since the backbone is decoder-only, we use the final token representation $h_{pool} = h_n$ as the query representation, which is passed through a lightweight classification head:
+The distilled router is initialized from a pretrained language-model backbone. For a query $x = (t_1, \ldots, t_n)$, the decoder-only backbone produces hidden states $H = (h_1, \ldots, h_n)$; following prior work adapting decoder-based language models to non-generative tasks~\citep{suganthan2025adapting}, we take the final-token representation $h_{pool} = h_n$ and pass it through a lightweight classification head:
 \begin{equation}
-  h' = \text{Dropout} \Big( \text{GELU} ( W_1 \text{LayerNorm}(h_{pool}) + b_1 ) \Big), \quad \hat{y} = \text{Softmax} ( W_2 h' + b_2 ),
-  \label{eq:head}
+h' = \text{Dropout} \Big( \text{GELU} ( W_1 \text{LayerNorm}(h_{pool}) + b_1 ) \Big), \quad \hat{y} = \text{Softmax} ( W_2 h' + b_2 ),
+\label{eq:head}
 \end{equation}
-where $W_1, W_2, b_1, b_2$ are learnable parameters. The resulting distribution $\hat{y} = \pi_\theta(y \mid x)$ represents the student router's routing prediction.
+with learnable $W_1, W_2, b_1, b_2$, LayerNorm~\citep{ba2016layer}, GELU~\citep{hendrycks2016gelu}, and Dropout~\citep{srivastava2014dropout}. The resulting $\hat{y} = \pi_\theta(y \mid x)$ is the distilled router's prediction.
 
 \subsection{Route-Only Distillation}
 \label{sec:route-only}
 
-Our first distillation strategy transfers only the teacher's routing decisions. The student router is trained using teacher-generated routing labels as supervision, with loss
+The first strategy transfers only the teacher's routing decisions, via
 \begin{equation}
-  L_{route} = -\sum_{c \in \mathcal{Y}} y_c \log \hat{y}_c,
-  \label{eq:lroute}
+L_{\text{route}} = -\sum_{c \in \mathcal{Y}} y_c \log \hat{y}_c,
+\label{eq:lroute}
 \end{equation}
-where $y_c$ is the teacher routing label and $\hat{y}_c$ is the predicted routing probability. This objective transfers the teacher routing policy solely through routing labels and serves as the primary distillation baseline.
+where $y_c$ is the teacher label and $\hat{y}_c$ the predicted probability. This is the primary distillation baseline.
 
-\subsection{Reasoning-Augmented Distillation}
+\subsection{Reasoning-Plus-Route Distillation}
 \label{sec:reasoning-plus-route}
 
-A routing label provides supervision only over the teacher's final routing decision. We therefore investigate whether routing-policy distillation benefits from additional supervision derived from teacher reasoning traces. In addition to the routing objective, the student router is trained to predict the teacher's reasoning sequence $r = (r_1, \ldots, r_T)$, with objective
+A routing label supervises only the teacher's final decision, so we test whether adding the teacher's reasoning traces as supervision helps. The distilled router is additionally trained to predict the reasoning sequence $r = (r_1, \ldots, r_T)$:
 \begin{equation}
-  L_{reason} = -\sum_{t=1}^{T} \log P(r_t \mid r_{<t}, x).
-  \label{eq:lreason}
+L_{\text{reason}} = -\sum_{t=1}^{T} \log P(r_t \mid r_{<t}, x).
+\label{eq:lreason}
 \end{equation}
-The final training objective combines both terms,
+The two terms combine as
 \begin{equation}
-  L = \lambda_{route} L_{route} + \lambda_{reason} L_{reason}.
-  \label{eq:ltotal}
+L = \lambda_{\text{route}} L_{\text{route}} + \lambda_{\text{reason}} L_{\text{reason}}.
+\label{eq:ltotal}
 \end{equation}
-Because reasoning traces are used only during training, both distillation variants incur identical deployment cost. At inference time, the student router receives only the query and predicts a routing label through a single forward pass.
+Since reasoning traces are used only in training, both variants have identical deployment cost: at inference, the router sees only the query and predicts a label in one pass.
 
 
 
@@ -189,11 +176,11 @@ The goal of our experiments is to evaluate whether routing policies can be effec
 
 We design our experiments to answer three questions.
 \begin{description}
-  \item[RQ1.] How effectively can a routing policy be transferred from an accurate but expensive teacher router to a compact student router?
+  \item[RQ1.] How effectively can a routing policy be transferred from an accurate but expensive teacher router to a lightweight distilled router?
   \item[RQ2.] Does augmenting routing supervision with teacher reasoning improve policy transfer relative to route-only distillation?
   \item[RQ3.] Do improvements in policy transfer translate into improvements in routing accuracy under independent oracle labels?
 \end{description}
-Answering RQ3 requires an evaluation target that does not simply re-measure performance against the teacher router. This is the role of the oracle labels (\ref{sec:oracle-routing-policy}). Oracle labels are used only for evaluation and provide an independent measure of routing accuracy; they are never used to supervise a router during training.
+RQ3 requires an evaluation target independent of the teacher router — the role of the oracle labels (\ref{sec:oracle-routing-policy}), used only for evaluation and never to supervise training.
 
 \subsection{Routing Label Spaces}
 \label{sec:routing-label-spaces}
@@ -202,22 +189,399 @@ DistillRouter (\S\ref{sec:methodology}) is agnostic to the routing label space $
 
 \paragraph{Binary Routing.} Our primary configuration frames routing as an escalation decision,
 \begin{equation}
-  \mathcal{Y}_{binary} = \{\texttt{small}, \texttt{large}\},
+  \mathcal{Y}_{\text{binary}} = \{\texttt{small}, \texttt{large}\},
 \end{equation}
 where \texttt{small} denotes routing to whichever of $\{m_1, m_2\}$ is the cheapest candidate that answers the query correctly, and \texttt{large} denotes routing to $m_3$. Oracle labels (\ref{sec:oracle-routing-policy}) determine the correct assignment. This routing setting reflects the deployment scenario most relevant to cost-sensitive routing: whether a query can remain on a low-cost model or must be escalated to the highest-capability model.
 
-\paragraph{Three-Way Routing.} To evaluate finer-grained routing decisions, we additionally consider a three-way routing label space that maps directly to the three candidate tiers in $\mathcal{M}$. This setting is evaluated as a generalization check rather than the primary experimental configuration.
+\paragraph{Three-Label Routing.} To evaluate finer-grained routing decisions, we additionally consider a three-label routing label space that maps directly to the three candidate tiers in $\mathcal{M}$. This setting is evaluated as a generalization check rather than the primary experimental configuration.
 
 \paragraph{Model-Scale Analysis.}
 \label{sec:scaling-generalization}
-Independently of routing setting, we repeat experiments using both 270M and 1B student-router backbones to assess whether routing-policy distillation behaves differently across model scales (\ref{sec:effect-of-scale}). This analysis is performed under both routing settings, completing the full routing-setting $\times$ backbone grid.
+Independently of routing setting, we repeat experiments using both 270M and 1B distilled-router backbones to assess whether routing-policy distillation behaves differently across model scales (\ref{sec:effect-of-scale}). This analysis is performed under both routing settings, completing the full routing-setting $\times$ backbone grid.
 
 \subsection{Routing Environment}
 \label{sec:datasets}
 
-A routing environment is defined by three components: the queries a router must classify, the candidate models available to answer them, and the routing label space used to represent routing decisions (\ref{sec:problem_formulation}). We fix all three before introducing either the teacher router or the student router.
+A routing environment fixes three components before introducing either router: the queries a router must classify, the candidate models available to answer them, and the routing label space used to represent routing decisions (\ref{sec:problem_formulation}).
 
-\textbf{Datasets.} We evaluate DistillRouter on two mathematical question-answering benchmarks: GSM8K \citep{cobbe2021training}, consisting of grade-school arithmetic word problems, and MATH \citep{hendrycks2021measuring}, consisting of competition-level mathematics problems spanning seven subjects and five difficulty levels.
+\textbf{Datasets.} We evaluate DistillRouter on two mathematical question-answering benchmarks: GSM8K \citep{cobbe2021training}, consisting of grade-school arithmetic word problems, and MATH \mbox{\citep{hendrycks2021measuring}}, consisting of competition-level mathematics problems spanning seven subjects and five difficulty levels.
+
+Split sizes and per-tier oracle-label distributions are in Appendix Table~\ref{tab:splits}; GSM8K is dominated by the medium tier, whereas MATH is predominantly assigned to the large tier, reflecting greater routing difficulty in the latter dataset. Reference answers were extracted and normalized prior to evaluation: GSM8K answers were parsed from the \verb|<answer>| delimiter, whereas MATH answers were extracted from \verb|\boxed{}| expressions. Exact-match evaluation was used throughout, without symbolic-equivalence checking.
+
+\textbf{Candidate Models.} Three computational tiers (small/medium/large) plus the teacher span two open-weight families, Gemma 3~\citep{gemmateam2025gemma3} and Qwen2.5~\citep{qwenteam2024qwen25}, chosen to reflect heterogeneous deployment environments and remain efficient enough for exhaustive oracle-label construction (\ref{sec:oracle-routing-policy}); full model names, parameter counts, and roles are in Appendix Table~\ref{tab:models}.
+
+\textbf{Why a 3B, non-frontier teacher.} We use Qwen2.5-3B-Instruct rather than a frontier API model (GPT-4o, Gemini, Claude) to keep the pipeline self-hosted and reproducible, since our question is whether an existing router's policy can be distilled, not what the most accurate router is. The two-stage prompt (\ref{sec:teacher-policy}) was fixed once, not tuned for accuracy, so the 0.592 oracle accuracy in Section~\ref{sec:can-be-distilled} is a non-optimized baseline, not a ceiling; whether findings hold with a frontier-scale teacher is open (\ref{sec:limitations}).
+
+\textbf{Routing Setting.} Binary routing is used throughout Sections~\ref{sec:can-be-distilled}--\ref{sec:rq3-efficiency} as the primary configuration. Three-label routing is evaluated separately as a generalization check. Both settings are defined in \S\ref{sec:routing-label-spaces}.
+
+Teacher prompting details and distilled-router training hyperparameters are in Appendix~\ref{sec:teacher-config-appendix} and~\ref{sec:training-protocol}.
+
+\subsection{Evaluation Metrics}
+\label{sec:evaluation_metrics}
+
+We evaluate distilled routers along three dimensions: \emph{policy
+transfer} (accuracy and macro-F1 against the teacher's routing
+decisions, answering RQ1--RQ2), \emph{routing accuracy} (accuracy and
+macro-F1 against independent oracle labels, answering RQ3), and
+\emph{deployment efficiency} (routing latency and speedup relative to
+the teacher, excluding tokenization, model loading, and
+answer-generation latency). Full metric definitions, including how
+routing latency is measured, are in
+Appendix~\ref{sec:eval-metrics-appendix}.
+\section{Results}
+\label{sec:results}
+
+This paper's central claim is that policy distillation enables efficient LLM routing: a compact router using one forward pass can match or exceed an expensive multi-stage teacher's routing accuracy at a fraction of the deployment cost. We evaluate routing accuracy (RQ1, Section~\ref{sec:can-be-distilled}), then deployment efficiency (Section~\ref{sec:rq3-efficiency}), then the effect of reasoning supervision on policy transfer (RQ2, Section~\ref{sec:main-result}). We close by examining why distilled routers exceed the teacher's oracle accuracy (Section~\ref{sec:distillation-improves-teacher}) and whether policy transfer predicts routing accuracy (RQ3, Section~\ref{sec:teacher-fidelity-oracle}), with scaling-behavior and error-analysis checks in Appendix~\ref{sec:effect-of-scale}--\ref{sec:error-analysis}. Unless noted, results use the primary configuration: binary routing, 270M backbone.
+\subsection{Routing Accuracy}
+\label{sec:can-be-distilled}
+
+\textbf{RQ1: Can routing policies be effectively transferred from a teacher router to a distilled router?}
+
+We report routing accuracy, downstream answer quality, and latency for
+the teacher and both distilled routers in Table~\ref{tab:mainperf},
+under the primary binary-routing configuration. Distillation
+substantially improves routing accuracy over the teacher, and does so
+while cutting routing latency by roughly two orders of magnitude and
+using a far smaller deployed model: the distilled variants dominate
+the teacher on every axis measured. Several additional observations
+follow.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Routing Accuracy and Deployment Efficiency} (binary
+label space, 270M backbone; primary configuration). Acc vs.\ oracle
+labels; end-to-end acc.\ resolves each decision to a candidate, then
+checks correctness (\ref{sec:evaluation_metrics}). Pooled across both
+datasets (1,000 queries/seed), mean $\pm$ SD, 10 seeds.
+Always-Medium/Large serve every query with one fixed candidate
+(0~ms latency); their Acc vs.\ Oracle is that constant predictor's
+accuracy.}
+\label{tab:mainperf}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Method & Acc vs.\ Oracle & End-to-End Acc & Routing Latency (ms) \\
+\midrule
+Always Medium & 0.349 & 0.336 & -- \\
+Always Large & 0.651 & 0.456 & -- \\
+Teacher & 0.592 & 0.392 & 1{,}633 \\
+Route-only & 0.682 $\pm$ 0.011 & 0.405 $\pm$ 0.005 & 10.9 \\
+Reasoning-plus-route & \textbf{0.692 $\pm$ 0.008} & 0.408 $\pm$ 0.005 & 11.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+First, the gain is not just in oracle accuracy: the corresponding
+improvement in end-to-end accuracy is real, though more modest, since
+downstream quality also depends on the candidate models themselves,
+not just the routing decision. This still indicates that better
+routing decisions bring practical benefits beyond routing metrics
+alone. The teacher's own accuracy is a deliberately non-optimized baseline
+(\ref{sec:datasets}), so the relevant comparison throughout is the gap
+between the teacher's policy and what distillation does to it, not the
+best achievable absolute number.
+
+\begin{figure}[h]
+\centering
+\caption{\textbf{F1-Latency Frontier.} Routing Accuracy (y-axis) vs.\
+per-query latency in ms, log scale (x-axis), for all eight
+distilled-router configurations plus the teacher, each in its own
+label space. Color: distillation variant. Shape: backbone (270M
+circle, 1B square). Fill: label space (binary filled, three-label
+hollow). Error bars: $\pm 1$ SD, 10 seeds. Dashed/dotted lines mark
+the teacher's own oracle macro-F1 in binary (0.591, close to but
+distinct from the 0.592 accuracy in Table~\ref{tab:mainperf}) and
+three-label (0.380); not comparable across families, so each is judged
+only against its own anchor. Every distilled-router point beats its
+teacher on both axes: all eight lie on a superior Pareto frontier.}
+\label{fig:pareto}
+\vspace{4pt}
+
+
+
+\includegraphics[width=0.6\linewidth]{figures/fig_pareto.png}
+\end{figure}
+
+Second, this advantage is not confined to the primary configuration.
+Figure~\ref{fig:pareto} extends the comparison to all eight evaluated
+distilled-router settings: every one achieves both lower latency and
+higher oracle F1 than the teacher anchor for its own label space,
+placing all eight on a strictly superior Pareto frontier.
+
+Third, routing latency alone does not capture the full cost of serving a query: the routing decision's real purpose is to control the cost of \emph{answering} it, which also depends on the answer-generation latency of whichever candidate the decision selects. Figure~\ref{fig:cost-quality} places DistillRouter and the teacher against three fixed-policy baselines on this fuller cost (routing latency plus the expected answer-generation latency of the served candidate, weighted by the predicted-label distribution) versus end-to-end accuracy.
+
+\begin{figure}[h]
+\centering
+\caption{\textbf{Cost-Quality Frontier} (binary label space, 270M
+backbone). Expected cost per query in milliseconds of compute, log
+scale (x-axis) vs.\ end-to-end accuracy (y-axis). Diamonds: fixed
+policies that serve every query with one candidate. Star: the teacher.
+Circles: DistillRouter, route-only (RO) and reasoning-plus-route (RR).
+Dotted line: the oracle ceiling (0.542), the accuracy of always
+picking the cheapest candidate that happens to answer correctly, an
+upper bound no real policy can exceed. Cost is measured in compute
+latency rather than dollar price (\ref{sec:datasets}).}
+\label{fig:cost-quality}
+\vspace{4pt}
+
+\includegraphics[width=0.55\linewidth]{figures/fig_cost_quality.png}
+\end{figure}
+On this view, the advantage narrows: both the teacher and DistillRouter fall between the Always-Medium and Always-Large baselines rather than beating either, and Always-Large retains the single highest raw accuracy of any point plotted. Routing therefore does not dominate the static Always-Large baseline in this aggregate view. Its value lies instead in the oracle-accuracy results above: routing identifies \emph{which} queries can safely stay on a cheaper candidate, a distinction the three-point plot cannot show. The gap to the oracle ceiling likewise shows substantial headroom remains for every policy plotted, including the teacher.
+
+Together, these results show that routing policy transfers effectively into lightweight distilled models, delivering large, consistent oracle-accuracy and latency gains across every configuration tested — though end-to-end accuracy gains are smaller, and routing does not yet dominate the simplest static baseline.
+
+
+
+\subsection{Deployment Efficiency}
+\label{sec:rq3-efficiency}
+
+\textbf{How much deployment efficiency can be gained through
+distillation?}
+
+Deployment efficiency is DistillRouter's primary motivation, and the
+gains are large: shifting from the teacher's multi-stage prompting
+process (\ref{sec:distillrouter_framework}) to a single forward pass
+delivers speedups of up to 153× over the teacher, with routing
+accuracy at or above the teacher's throughout
+(\ref{sec:can-be-distilled}).
+
+This holds across every evaluated configuration (Table~\ref{tab:mainperf}
+for the primary configuration; Appendix Table~\ref{tab:efficiency}
+for the remaining six): label-space granularity has little effect on
+latency, and although scaling the backbone from 270M to 1B costs more,
+substantial efficiency gains over the teacher remain.
+\subsection{Reasoning Supervision and Policy Transfer}
+\label{sec:main-result}
+\textbf{RQ2: Does reasoning supervision improve policy transfer?}
+
+Having established that distillation works and is efficient, we test
+whether reasoning supervision improves it further. This section covers
+policy transfer alone (agreement with the teacher's labels);
+Section~\ref{sec:teacher-fidelity-oracle} covers whether the decisions
+are actually correct. Two patterns emerge from Table~\ref{tab:main270m}.
+
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Policy Transfer Results.}
+Macro-F1 against the teacher's decision, mean $\pm$ SD
+across 10 seeds. $\Delta$ is route-only minus reasoning-plus-route on
+macro-F1, with a 95\% CI from a paired bootstrap~\citep{koehn2004statistical} over the 10 seeds;
+\textbf{bold} marks a CI that excludes zero.}
+\label{tab:main270m}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Configuration & RO F1 & RR F1 & $\Delta$ F1 (RO $-$ RR) \\
+\midrule
+Binary (270M)& 0.651 $\pm$ 0.005 & 0.645 $\pm$ 0.010 & $+0.0065$ ($[-0.0118, +0.0232]$) \\
+Three-Label  & 0.477 $\pm$ 0.025 & 0.460 $\pm$ 0.018 & $+0.017$ ($[-0.022, +0.062]$) \\
+
+\midrule
+
+Binary (1B) & 0.652 $\pm$ 0.016 & 0.676 $\pm$ 0.008 & \textbf{$-0.024$ ($[-0.062, -0.003]$)} \\
+Three-Label & 0.505 $\pm$ 0.012 & 0.529 $\pm$ 0.012 & \textbf{$-0.024$ ($[-0.055, -0.001]$)} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+First, scale matters: at the 270M backbone, route-only and
+reasoning-plus-route distillation transfer the teacher's policy about
+equally well, with confidence intervals overlapping on every metric
+and including zero. At the larger 1B scale, however, reasoning
+supervision produces a small but statistically reliable gain in policy
+transfer, consistent across both label spaces. Because this comparison
+holds data, architecture, and seeds fixed and varies only the training
+objective, the association rests on firmer footing than a purely
+observational correlation would, though it still comes from a single
+teacher and task domain (\ref{sec:limitations}). This is consistent
+with reasoning signals helping the router reproduce teacher behavior
+more closely as capacity grows.
+
+Second, and more surprisingly, this improved imitation does not
+translate into better routing accuracy. At 1B, reasoning-plus-route
+distillation's end-to-end accuracy is actually slightly \emph{lower}
+than route-only's at both label spaces (\ref{sec:can-be-distilled}) —
+the opposite direction from its confirmed fidelity advantage. A
+single-configuration study would have reported just one of these
+270M/1B outcomes as the general finding.
+
+\subsection{Distilled Routers Achieve Higher Oracle Accuracy Than the Teacher}
+\label{sec:distillation-improves-teacher}
+
+A counterintuitive finding: distilled routers achieve higher oracle
+accuracy than the teacher that supervised them
+(Table~\ref{tab:mainperf}, \ref{sec:can-be-distilled}). Both are
+measured against the same ground truth, so this is a direct
+comparison, not an artifact of differing label distributions — yet the
+distilled router is trained on nothing but the teacher's own labels.
+We treat "the student exceeds the teacher" as a robust empirical
+pattern, not a settled finding, and return to candidate explanations
+below.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Policy Transfer vs.\ Routing Accuracy}, mean $\pm$ SD
+across 10 seeds, all four configurations, both metrics. In every row,
+the oracle accuracy point estimate is at least as high as accuracy
+against the teacher, though for Binary (1B) reasoning-plus-route the
+two are within 0.002 of each other, well inside one SD (see prose
+below); \textbf{bold} marks the higher-scoring variant in each F1
+column, within each configuration, illustrating that accuracy and
+macro-F1 do not always agree (e.g.\ Binary (1B) favors
+reasoning-plus-route on accuracy but route-only on F1).}
+\label{tab:teacher-oracle-accuracy}
+\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Configuration & Variant & Acc vs.\ Teacher & Acc vs.\ Oracle & F1 vs.\ Teacher & F1 vs.\ Oracle \\
+\midrule
+\multirow{2}{*}{Binary (270M)} & Route-only & 0.652 $\pm$ 0.005 & 0.682 $\pm$ 0.011 & \textbf{0.651 $\pm$ 0.005} & 0.667 $\pm$ 0.010 \\
+ & Reasoning-plus-route & 0.645 $\pm$ 0.011 & 0.692 $\pm$ 0.008 & 0.645 $\pm$ 0.010 & \textbf{0.675 $\pm$ 0.007} \\
+\addlinespace
+\multirow{2}{*}{Three-Label} & Route-only & 0.549 $\pm$ 0.010 & 0.636 $\pm$ 0.016 & \textbf{0.477 $\pm$ 0.025} & 0.435 $\pm$ 0.005 \\
+ & Reasoning-plus-route & 0.545 $\pm$ 0.007 & 0.645 $\pm$ 0.015 & 0.460 $\pm$ 0.018 & \textbf{0.436 $\pm$ 0.008} \\
+ \midrule
+\addlinespace
+\multirow{2}{*}{Binary (1B)} & Route-only & 0.652 $\pm$ 0.016 & 0.676 $\pm$ 0.014 & 0.652 $\pm$ 0.016 & 0.658 $\pm$ 0.011 \\
+ & Reasoning-plus-route & 0.677 $\pm$ 0.008 & 0.679 $\pm$ 0.011 & \textbf{0.676 $\pm$ 0.008} & \textbf{0.662 $\pm$ 0.007} \\
+ \addlinespace
+\multirow{2}{*}{Three-Label} & Route-only & 0.574 $\pm$ 0.007 & 0.633 $\pm$ 0.010 & 0.505 $\pm$ 0.012 & \textbf{0.440 $\pm$ 0.007} \\
+ & Reasoning-plus-route & 0.587 $\pm$ 0.014 & 0.629 $\pm$ 0.009 & \textbf{0.529 $\pm$ 0.012} & 0.434 $\pm$ 0.009 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This pattern generalizes: Table~\ref{tab:teacher-oracle-accuracy} shows
+the oracle-accuracy point estimate at or above teacher accuracy in all
+eight configuration/variant pairs — though not uniformly: one cell
+(Binary (1B), reasoning-plus-route) is close enough to call a tie, and
+favors the teacher under macro-F1, consistent with
+Section~\ref{sec:teacher-fidelity-oracle}'s broader finding that
+accuracy and macro-F1 do not always agree. This pattern alone is
+suggestive, not conclusive, since the teacher and oracle have
+different label distributions; the controlled comparison above (same
+ground truth for both) is what actually establishes the claim.
+
+Nor is this simple memorization: the teacher systematically
+under-predicts large-tier queries, and distilled routers substantially
+recover these cases (Appendix~\ref{sec:error-analysis}) — learning a
+more accurate escalation boundary than the teacher demonstrated,
+rather than reproducing its errors.
+
+Why would a classifier trained only on the teacher's own labels
+outperform that teacher? The mechanism is not established; we see
+three non-exclusive candidates: (1) \emph{regularization} — fitting
+one boundary over many examples may average out per-query errors
+rather than reproduce them; (2) \emph{prompting instability} — the
+gap may reflect noise in the teacher's own two-stage prompting
+(\ref{sec:teacher-policy}) rather than a general property of
+distillation; (3) \emph{subtler contamination} — though splits are
+disjoint and oracle labels are never used for training
+(\ref{sec:oracle-routing-policy}), template overlap between GSM8K and
+MATH cannot be fully ruled out. Distinguishing these, e.g.\ by
+retraining against a deliberately degraded teacher, is left to future
+work.
+
+\subsection{Policy Transfer Does Not Predict Routing Accuracy}
+\label{sec:teacher-fidelity-oracle}
+\label{sec:fidelity-oracle-270m}
+
+\textbf{RQ3: Do improvements in policy transfer translate into
+improvements in routing accuracy?}
+
+We compare each variant's policy transfer against its accuracy on
+oracle labels, and find that imitating the teacher more closely does
+not reliably mean being more correct.
+
+\begin{figure}[h]
+\centering
+\caption{\textbf{Policy Transfer Does Not Predict Routing Accuracy.}
+Teacher F1 (x-axis, fidelity) vs.\ oracle F1 (y-axis, correctness) for
+route-only (RO) and reasoning-plus-route (RR) at all four
+configurations (same marker convention as Figure~\ref{fig:pareto}),
+the full rows of Table~\ref{tab:teacher-oracle-accuracy}. Dashed connectors join
+same-configuration pairs; error bars are $\pm 1$ SD across 10 seeds.}
+\label{fig:fidelity-vs-correctness}
+\vspace{4pt}
+
+\includegraphics[width=0.6\linewidth]{figures/fig_fidelity_vs_correctness.png}
+\end{figure}
+
+Across configurations, the variant with higher teacher F1 does not
+necessarily achieve higher oracle F1: at three of four configurations
+the higher-teacher-F1 variant has \emph{lower} oracle-F1, and even
+where rankings agree (binary/1B) the gap is not statistically
+reliable. This holds even where the fidelity advantage itself is
+confirmed (1B scale, \ref{sec:main-result}): no configuration shows a
+statistically reliable oracle-F1 advantage for either variant.
+
+To rule out a spurious correlation, not just an eight-point scatter: a
+naive pooled correlation across all eight points is strongly positive
+($r = +0.97$, $p < 0.001$), but this is a structural confound —
+binary-label-space configurations score higher than three-label ones
+on \emph{both} axes simply because binary is the easier problem
+(Table~\ref{tab:teacher-oracle-accuracy}) — not evidence that fidelity
+predicts correctness. Both a label-space-controlled partial
+correlation (80 seed runs) and a direct paired test on the
+reasoning-vs.-route-only \emph{change} (one point per configuration)
+collapse this to null, confirming Figure~\ref{fig:fidelity-vs-correctness}'s
+null correlation is not a sparse-scatter artifact; full statistics are
+in Appendix~\ref{sec:correlation-appendix}.
+
+Policy transfer and routing accuracy capture different aspects of
+routing behavior and should not be treated as proxies for each other.
+Two further checks confirm this without changing the picture: scaling
+the distilled-router backbone from 270M to 1B produces no reliable
+oracle-accuracy advantage in either label space, across the full
+2$\times$2 label-space-by-backbone grid — a low-capacity prediction
+problem for which lightweight models already suffice
+(Appendix~\ref{sec:effect-of-scale}); and a confusion-matrix analysis
+pooling all 10 seeds shows the accuracy gains reported above
+concentrate in one failure mode — the teacher under-escalates
+\texttt{large}-tier queries at essentially chance level, which
+distillation corrects specifically rather than improving uniformly
+(Appendix~\ref{sec:error-analysis}).
+
+\section{Limitations}
+\label{sec:limitations}
+
+This study has several limitations. First, experiments are restricted to mathematical reasoning benchmarks; generalization to other domains (e.g., coding, open-domain QA) remains unverified. Second, we evaluate a single, non-frontier teacher (Qwen2.5-3B-Instruct, fixed two-stage prompt, not tuned for accuracy; \ref{sec:datasets}); whether a frontier-scale or more heavily prompt-engineered teacher would change the transfer characteristics we report, including the student-exceeds-teacher effect (Section~\ref{sec:distillation-improves-teacher}), is untested. Third, our scaling analysis covers only two backbone sizes, limiting conclusions across broader capacity ranges. Finally, reasoning is studied only as a training-time signal; its interaction with inference-time reasoning-based routing is not investigated.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented DistillRouter, a routing-policy distillation framework for efficient LLM routing. DistillRouter transfers routing policy from an expensive teacher router into a lightweight distilled model, enabling routing decisions through a single forward pass. Across multiple routing configurations, distilled routers achieved higher oracle-label accuracy than the teacher used to supervise them while reducing routing latency by up to 153×, though the mechanism behind this gap remains an open question (Section~\ref{sec:distillation-improves-teacher}). We further found that reasoning supervision is associated with improved policy transfer at larger scales but is not consistently associated with improved routing correctness. Overall, our results support the conclusion that routing policies can be effectively compressed through knowledge distillation, suggesting a practical approach for reducing routing overhead in large-scale LLM deployment.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+
+
+\appendix
+\section{Appendix}
+\label{sec:appendix}
+
+Section~\ref{sec:related-work} surveys prior work in full. Sections~\ref{sec:splits-appendix}--\ref{sec:error-analysis}
+extend the main body's Experimental Setup and Results sections
+(dataset splits, candidate models, teacher prompting details, training
+hyperparameters, metric definitions, per-configuration efficiency,
+scaling behavior, and error analysis) at the same 10-seed standard
+used throughout the main body. The remaining checks below
+(\ref{sec:loss-weighting} onward) are single-seed diagnostics, not
+held to that standard; this is noted individually in each.
+
+\subsection{Related Work}
+\label{sec:related-work}
+
+\paragraph{LLM Routing.} LLM routing aims to reduce inference cost by selecting the most appropriate model for each query. Recent work has shown that routing can significantly improve cost-quality tradeoffs compared to always using the most capable model. RouteLLM~\citep{ong2024routellm} learns lightweight routers from human preference data and dynamically selects between stronger and weaker models at inference time. ZOOTER~\citep{lu2024zooter} uses reward-model signals to train routing functions that dispatch queries to expert models. More recently, Router-R1\citep{zhang2025routerr1} formulates routing as a sequential decision-making problem and trains an LLM router through reinforcement learning, interleaving reasoning and routing actions.
+While these approaches learn routing functions directly from preference labels, reward signals, or reinforcement learning, we instead distill the policy of an expensive teacher router into a lightweight deployable router — compressing an existing, costly policy rather than training a new one from preference, reward, or RL signals.
+
+\paragraph{Routing Distillation and Reasoning Supervision.}
+
+Knowledge distillation is widely used to transfer capabilities from large models to smaller ones, for example by using teacher-generated rationales as auxiliary training supervision~\citep{hsieh2023distilling}. Reasoning has also been explored as a mechanism for improving LLM decision making: in routing systems such as Router-R1, reasoning is generated during inference and contributes directly to routing decisions; closer to our setting, \citet{xu2025dualhead} train a classifier with an auxiliary reasoning head used only during training and dropped at inference, improving classifier accuracy without added inference cost. By contrast, we investigate reasoning as a training-time-only auxiliary supervisory signal specifically for routing-policy distillation, discarded at deployment, to study whether reasoning improves routing-policy transfer without increasing inference cost.
+
+\subsection{Dataset Splits}
+\label{sec:splits-appendix}
 
 \begin{table}[h]
 \centering
@@ -236,9 +600,8 @@ MATH & 1,000 & 749 & 500 & 4.0\% & 24.6\% & 71.4\% \\
 \end{tabular}
 \end{table}
 
-The oracle-label distributions differ substantially across datasets. GSM8K is dominated by the medium tier, whereas MATH is predominantly assigned to the large tier, reflecting greater routing difficulty in the latter dataset. Reference answers were extracted and normalized prior to evaluation: GSM8K answers were parsed from the \verb|#### <answer>| delimiter, whereas MATH answers were extracted from \verb|\boxed{}| expressions. Exact-match evaluation was used throughout, without symbolic-equivalence checking.
-
-\textbf{Candidate Models.} Table~\ref{tab:models} lists the candidate answering models spanning small-, medium-, and large-cost tiers, together with the teacher router used to generate supervision.
+\subsection{Candidate Models}
+\label{sec:models-appendix}
 
 \begin{table}[h]
 \centering
@@ -256,32 +619,30 @@ Teacher & Qwen2.5-3B-Instruct & 3.1B & Prompted only, never fine-tuned; reasonin
 \end{tabular}
 \end{table}
 
-
-The candidate models span three computational tiers while remaining sufficiently efficient for exhaustive oracle-label construction (\ref{sec:oracle-routing-policy}). Models were intentionally drawn from multiple families to reflect heterogeneous deployment environments rather than a single scaling series.
-
-\textbf{Routing Setting.} Binary routing is used throughout Sections~\ref{sec:can-be-distilled}--\ref{sec:rq3-efficiency} as the primary configuration. Three-way routing is evaluated separately as a generalization check. Both settings are defined in \S\ref{sec:routing-label-spaces}.
-
-\subsection{Teacher Configuration}
+\subsection{Teacher Configuration Details}
+\label{sec:teacher-config-appendix}
 \label{sec:teacher-policy}
-\label{sec:teacher_configuration}
 
-The teacher router follows a two-stage prompting procedure. For each query, a zero-shot prompt first generates a teacher reasoning trace describing the query's reasoning requirements, and a few-shot prompt then predicts a routing label conditioned on both the query and the generated reasoning trace. Few-shot demonstrations are sampled from the calibration split (\ref{sec:datasets}) and remain fixed throughout training and evaluation. The teacher router is Qwen2.5-3B-Instruct (Table~\ref{tab:models}).
+The teacher router follows a two-stage prompting procedure. For each
+query, a zero-shot prompt first generates a teacher reasoning trace
+describing the query's reasoning requirements, and a few-shot prompt
+then predicts a routing decision conditioned on both the query and
+the generated reasoning trace. Few-shot demonstrations are sampled
+from the calibration split (\ref{sec:datasets}) and remain fixed
+throughout training and evaluation. The teacher router is
+Qwen2.5-3B-Instruct.
 
-\subsection{Student Training}
+\subsection{Distilled Router Training}
 \label{sec:training-protocol}
-\label{sec:training_configuration}
-\label{sec:distilled-routers}
 
-We train the two routing-policy distillation variants introduced in Sections~\ref{sec:route-only} and~\ref{sec:reasoning-plus-route}: route-only distillation, where the student router learns exclusively from teacher routing labels, and reasoning-augmented distillation, where the student router additionally learns from teacher reasoning traces. All other aspects of training are identical, isolating the effect of reasoning supervision. Unless otherwise specified, all student routers are trained with the AdamW optimizer at a learning rate of $2 \times 10^{-5}$, batch size 8, bf16 mixed precision, and 3 training epochs. Models are selected using validation macro-F1 and evaluated once on the held-out test split. Macro-F1 is used because routing labels are imbalanced (Table~\ref{tab:splits}). Each main experiment is repeated across ten random seeds, with results reported as mean $\pm$ standard deviation.
+We train the two routing-policy distillation variants introduced in Sections~\ref{sec:route-only} and~\ref{sec:reasoning-plus-route} — route-only (teacher routing labels only) and reasoning-plus-route (additionally, teacher reasoning traces) — with all other training aspects identical, isolating the effect of reasoning supervision. Unless otherwise specified, all distilled routers are trained with the AdamW optimizer~\citep{loshchilov2019decoupled} at a learning rate of $2 \times 10^{-5}$, batch size 8, bf16 mixed precision, and 3 training epochs, selected using validation macro-F1 (imbalanced routing labels) and evaluated once on the held-out test split. Each main experiment is repeated across 10 seeds, with results reported as mean $\pm$ standard deviation.
 
-\subsection{Evaluation Metrics}
-\label{sec:evaluation_metrics}
-
-We evaluate distilled routers along three dimensions: policy transfer, routing accuracy, and deployment efficiency.
+\subsection{Evaluation Metric Definitions}
+\label{sec:eval-metrics-appendix}
 
 \paragraph{Policy Transfer.}
 \label{sec:routing-policy-transfer}
-Policy transfer measures how closely a student router reproduces the teacher router's routing policy. We report accuracy and macro-F1 between student routing labels and teacher routing labels. This metric answers RQ1 and RQ2.
+Policy transfer measures how closely a distilled router reproduces the teacher router's routing policy. We report accuracy and macro-F1 between distilled routing labels and teacher routing labels. This metric answers RQ1 and RQ2.
 
 \paragraph{Routing Accuracy.}
 \label{sec:routing-correctness}
@@ -289,466 +650,51 @@ Routing accuracy measures agreement with oracle labels rather than the teacher r
 
 \paragraph{Deployment Efficiency.}
 \label{sec:efficiency}
-We report routing latency and speedup relative to the teacher router. Latency is measured with batch size one on identical hardware for all methods. While the teacher router requires multiple prompted inference calls, a student router performs routing through a single forward pass. Deployment efficiency therefore quantifies the practical benefit of routing-policy distillation in real-world serving environments.
-\section{Results}
-\label{sec:results}
+We report routing latency and speedup relative to the teacher router.
+\emph{Routing latency} is the wall-clock time from an already-tokenized
+query to a routing decision: a single forward pass for the distilled
+router (\ref{sec:student-router}), or the sum of the teacher's two
+generation calls (\ref{sec:teacher-policy}). It excludes tokenization,
+detokenization, model loading, and the candidate's own
+\emph{answer-generation} latency, added back only in the cost-quality
+analysis (Figure~\ref{fig:cost-quality}). Latencies are measured at
+batch size one on the same GPU (NVIDIA GB10), as the mean over the
+test split for one run, not seed-averaged like accuracy
+(\ref{sec:training-protocol}).
 
-This paper's central claim is that routing-policy distillation enables efficient LLM routing: a compact, single-forward-pass student router can match or exceed the routing accuracy of an expensive multi-stage teacher router while operating at a fraction of the deployment cost. We first evaluate routing accuracy (RQ1, Section~\ref{sec:can-be-distilled}), then examine deployment efficiency (Section~\ref{sec:rq3-efficiency}), before analyzing the effect of reasoning supervision on policy transfer (RQ2, Section~\ref{sec:main-result}). We conclude with supporting analyses that investigate why distilled routers surpass teacher routing accuracy (Section~\ref{sec:distillation-improves-teacher}), the relationship between policy transfer and routing accuracy (Section~\ref{sec:teacher-fidelity-oracle}), scaling behavior (Section~\ref{sec:effect-of-scale}), and common routing errors (Section~\ref{sec:error-analysis}). Unless otherwise noted, all results use the primary configuration: binary routing with the 270M student-router backbone.
-
-\subsection{Routing Accuracy}
-\label{sec:can-be-distilled}
-
-\textbf{RQ1: Can routing policies be effectively transferred from a teacher router to a student router?}
-
-Table~\ref{tab:mainperf} reports routing accu, downstream answer
-quality, and latency for the teacher router and both distilled
-routers, on the same test queries, under this paper's primary
-binary-routing configuration.
-
-\begin{table}[h]
-\centering
-\caption{\textbf{Routing Accuracy and Deployment Efficiency} (binary label space, 270M
-backbone --- primary configuration). Accuracy is measured against
-oracle labels; end-to-end accuracy resolves each routing
-decision to a specific candidate and measures whether the resulting
-answer is correct (\ref{sec:evaluation_metrics}). Pooled across both
-datasets (1,000 queries per seed), mean $\pm$ SD across 10 seeds.
-Always-Medium/Always-Large serve every query with one fixed candidate,
-so they make no routing decision (0~ms routing latency, speedup
-undefined); their Acc vs.\ Oracle is the accuracy of the corresponding
-trivial constant-label routing predictor against oracle ground truth.
-RouteLLM rows use the public \texttt{bert} router
-(\texttt{routellm/bert\_gpt4\_augmented}, an XLM-RoBERTa-base
-classifier, calibrated on GPT-4/Mixtral preference data, not this
-paper's candidates or domain) at two threshold-calibration targets on
-this paper's own train split, evaluated once (deterministic, no seed
-variance) --- see \ref{sec:routellm-baseline}.}
-\label{tab:mainperf}
-\begin{tabular}{@{}lrrrr@{}}
-\toprule
-Method & Acc vs.\ Oracle & End-to-End Acc & Routing Latency (ms) & Speedup \\
-\midrule
-Always Medium & 0.349 & 0.336 & 0 (no routing) & --- \\
-Always Large & 0.651 & 0.456 & 0 (no routing) & --- \\
-RouteLLM (bert, rate-matched to DistillRouter) & 0.571 & 0.404 & 2.83 & 577× \\
-RouteLLM (bert, rate-matched to oracle) & 0.588 & \textbf{0.421} & 2.83 & 577× \\
-Teacher & 0.592 & 0.392 & 1{,}633 & 1.0× \\
-Route-only & 0.682 $\pm$ 0.011 & 0.405 $\pm$ 0.005 & 10.9 & 150× \\
-Reasoning-plus-route & \textbf{0.692 $\pm$ 0.008} & 0.408 $\pm$ 0.005 & 11.2 & 146× \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Distillation substantially improves routing accuracy relative to
-the teacher router. Across both distilled variants, oracle routing accuracy
-improves by approximately 9--10 percentage points (0.592 $\to$
-0.682--0.692) while end-to-end downstream accuracy improves modestly
-(0.392 $\to$ 0.405--0.408) despite using a substantially smaller
-deployed router --- simultaneously reducing routing latency from
-1{,}633~ms to approximately 11~ms.
-
-\paragraph{Comparison to RouteLLM.}
-\label{sec:routellm-baseline}
-RouteLLM \citep{ong2024routellm} trains a lightweight classifier to
-predict, for a query, the probability that a strong model should be
-used instead of a weak one, thresholded into a binary routing
-decision --- methodologically the closest prior system to this paper's
-binary label space. Of RouteLLM's released routers, only \texttt{bert}
-runs without an external paid API: \texttt{mf} and \texttt{sw\_ranking}
-call OpenAI's embedding API at inference, and \texttt{causal\_llm} ships
-checkpoints tied to a specific 8B model, so we evaluate \texttt{bert}
-(\texttt{routellm/bert\_gpt4\_augmented}) directly, unmodified, as
-published. Critically, this checkpoint was trained on Chatbot Arena
-human-preference battles between \texttt{gpt-4-1106-preview} and
-\texttt{mixtral-8x7b-instruct-v0.1} --- a subjective response-quality
-signal between two frontier-scale chat models, not the objective
-task-correctness signal this paper's oracle labels provide, and not
-calibrated to this paper's candidate pool at all. We therefore report
-it as an out-of-the-box baseline, not a like-for-like retrained
-comparison: we compute its win-rate score for every query, then
-calibrate a single threshold on this paper's own train split to hit a
-target escalation rate, at two targets --- matching route-only's own
-56.1\% escalation rate (a cost-matched comparison) and matching the
-oracle's true 65.1\% escalation rate (a generous, best-case
-calibration for RouteLLM) --- before evaluating once on the test
-split (no seed variance: the checkpoint and threshold are both fixed).
-
-The results in Table~\ref{tab:mainperf} are mixed rather than a clean
-win either way. RouteLLM's oracle agreement (0.571--0.588) is
-\emph{lower} than even the teacher's (0.592), consistent with the
-domain mismatch described above --- an off-the-shelf preference
-classifier calibrated on GPT-4-vs-Mixtral quality differences has no
-reason to transfer to deciding whether a 270M-parameter model can
-solve a grade-school arithmetic problem. Yet its end-to-end accuracy
-(0.404--0.421) is competitive with both distilled variants, edging out
-reasoning-plus-route at the oracle-matched threshold. This is not a
-contradiction: the binary deployment policy (\ref{sec:evaluation_metrics})
-routes every \texttt{cheap} decision to the medium candidate regardless
-of which specific queries are labeled \texttt{cheap}, so end-to-end
-accuracy is more forgiving of routing-label disagreement than oracle
-agreement is. Oracle agreement remains the more diagnostic metric for
-routing quality specifically (\ref{sec:teacher-fidelity-oracle} makes
-the general case for why), and on that metric RouteLLM's off-the-shelf
-router underperforms every routing policy evaluated in this paper,
-including the teacher it was never trained to compete with.
-
-Although the downstream gains are smaller in magnitude than the
-oracle-accuracy gains, they indicate that improved routing decisions
-translate to practical benefits beyond routing metrics alone. Overall,
-these results demonstrate that routing policy can be effectively
-transferred into lightweight student models without sacrificing
-routing accuracy.
-
-\begin{figure}[h]
-\centering
-\caption{\textbf{Routing Accuracy vs.\ Latency: the full Pareto
-picture.} Oracle macro-F1 (y-axis) vs.\ per-query routing latency in
-milliseconds, log scale (x-axis), for all eight distilled-router
-configurations plus the teacher, evaluated in its own label space in
-each case. Marker color denotes distillation variant (route-only vs.\
-reasoning-plus-route), shape denotes backbone size (270M circle, 1B
-square), and fill denotes label space (binary filled, 3-label hollow).
-Error bars are $\pm 1$ SD across 10 seeds. Dashed and dotted lines mark
-the teacher's own oracle macro-F1 in the binary (0.591) and 3-label
-(0.380) label spaces, respectively --- binary and 3-label F1 are not on
-a directly comparable absolute scale, so each family is judged only
-against its own teacher anchor. Every one of the eight student points
-has both lower latency and higher oracle F1 than its own label-space's
-teacher: every student lies on a superior Pareto frontier.}
-\label{fig:pareto}
-\vspace{4pt}
-
-\includegraphics[width=0.7\linewidth]{figures/fig_pareto.png}
-\end{figure}
-
-Figure~\ref{fig:pareto} measures routing latency in isolation; the
-routing decision's ultimate purpose, however, is to control the cost
-of \emph{answering} the query. Figure~\ref{fig:cost-quality} places
-DistillRouter and the teacher against three fixed-policy baselines ---
-always serving every query with the small, medium, or large candidate
---- on cost (routing latency plus the expected answer-generation
-latency of whichever candidate the router actually serves, weighted by
-its predicted-label distribution on the test set) versus end-to-end
-accuracy.
-
-\begin{figure}[h]
-\centering
-\caption{\textbf{Cost-Quality Frontier} (binary label space, 270M
-backbone). Expected cost per query in milliseconds of compute, log
-scale (x-axis) vs.\ end-to-end accuracy (y-axis). Diamonds: fixed
-policies that serve every query with one candidate. Star: the teacher
-router. Circles: DistillRouter, route-only (RO) and reasoning-plus-route
-(RR). Dotted line: the oracle ceiling (0.542) --- the accuracy of
-always picking the cheapest candidate that happens to answer each
-query correctly, an upper bound no real policy can exceed. Cost proxy
-is compute latency rather than a dollar price, since every candidate
-here is self-hosted rather than API-billed (\ref{sec:datasets}).}
-\label{fig:cost-quality}
-\vspace{4pt}
-
-\includegraphics[width=0.65\linewidth]{figures/fig_cost_quality.png}
-\end{figure}
-
-Both the teacher and DistillRouter land between the Always-Medium and
-Always-Large baselines on both axes, roughly tracking the straight
-line between them rather than sitting clearly above or below it:
-DistillRouter (route-only) costs 24\% less than Always-Large while
-recovering 57\% of Always-Large's accuracy gain over Always-Medium.
-Router-based approaches therefore do not dominate the static
-Always-Large baseline in this aggregate end-to-end view --- Always-Large
-still has the single highest accuracy of any point plotted. Their value
-is visible instead in the oracle-routing-accuracy results above: routing
-correctly identifies \emph{which} queries can safely stay on a cheaper
-candidate, which this coarse three-point cost/accuracy view collapses
-away. The gap to the oracle ceiling (0.542) also shows substantial
-headroom remains unclaimed by every real policy shown, including the
-teacher.
-
-\subsection{Deployment Efficiency}
-\label{sec:rq3-efficiency}
-
-\textbf{RQ3: How much deployment efficiency can be gained through
-routing-policy distillation?}
-
-While routing accuracy is important, the primary motivation for
-DistillRouter is reducing deployment overhead. The teacher router
-performs routing through a multi-stage process involving reasoning
-generation followed by route prediction; in contrast, the student
-router predicts routing labels through a single forward pass. Consequently,
-routing latency decreases from 1{,}633~ms to approximately 11~ms.
+\subsection{Efficiency Across All Configurations}
+\label{sec:efficiency-appendix}
 
 \begin{table}[h]
 \centering
-\caption{\textbf{Efficiency.} Latency and speedup vs.\ the teacher,
-primary configuration first, then the label-space and backbone
-generalization checks (\ref{sec:main-result}, \ref{sec:effect-of-scale}).
-Teacher latency is measured directly (mean over the pooled 1,000-query
-test split.}
+\caption{\textbf{Efficiency, Generalization Checks.} Latency and
+speedup vs.\ the teacher for the label-space/backbone variants beyond
+the primary configuration, whose latency and speedup are already
+reported in Table~\ref{tab:mainperf}
+(\ref{sec:main-result}, \ref{sec:effect-of-scale}). Teacher
+latency is measured directly (mean over the pooled 1,000-query
+test split).}
 \label{tab:efficiency}
-\begin{tabular}{@{}lrr@{}}
-\toprule
-Router & Latency (ms) & Speedup \\
-\midrule
-Teacher (two calls + demonstrations) & 1{,}633 & 1.0× \\
-Route-only (270M, binary) & 10.9 & 150× \\
-Reasoning-plus-route (270M, binary) & 11.2 & 146× \\
-Route-only (270M, 3-label) & 10.6 & 153× \\
-Reasoning-plus-route (270M, 3-label) & 11.2 & 145× \\
-Route-only (1B, 3-label) & 20.8 & 78× \\
-Reasoning-plus-route (1B, 3-label) & 22.4 & 72× \\
-Route-only (1B, binary) & 20.8 & 78× \\
-Reasoning-plus-route (1B, binary) & 22.3 & 73× \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Across all evaluated configurations, DistillRouter achieves speedups
-ranging from 72$\times$ to 150$\times$ while maintaining strong
-routing accuracy. Label-space granularity has minimal impact on
-latency (binary vs.\ 3-label differ by $<5\%$ at matched backbone),
-whereas increasing student model size from 270M to 1B approximately
-doubles latency but still provides substantial efficiency gains
-relative to the teacher. These results show that routing-policy
-distillation successfully shifts computation from inference time to
-training time, enabling highly efficient deployment.
-\subsection{Reasoning Supervision and Policy Transfer}
-\label{sec:main-result}
-
-\textbf{RQ2: Does reasoning supervision improve policy transfer?}
-
-Having established that distillation works and is efficient, we ask
-whether augmenting the routing objective with reasoning supervision improves it relative to route-only
-distillation. This section evaluates policy transfer only (agreement with the teacher's routing labels);
-Section~\ref{sec:teacher-fidelity-oracle} asks the separate question
-of whether either variant's decisions are actually correct.
-
-\begin{table}[h]
-\centering
-\caption{\textbf{Policy Transfer Results.}
-Accuracy and macro-F1 against the teacher's decision, mean $\pm$ SD
-across 10 seeds. $\Delta$ is route-only minus reasoning-plus-route on
-macro-F1, with a 95\% CI from a paired bootstrap over the ten seeds;
-\textbf{bold} marks a CI that excludes zero.}
-\label{tab:main270m}
-\small
-\begin{tabular}{@{}lrrrrr@{}}
-\toprule
-Configuration & RO Acc & RO F1 & RR Acc & RR F1 & $\Delta$ F1 (RO $-$ RR) \\
-\midrule
-Binary (270M)& 0.652 $\pm$ 0.005 & 0.651 $\pm$ 0.005 & 0.645 $\pm$ 0.011 & 0.645 $\pm$ 0.010 & $+0.0065$ ($[-0.0118, +0.0232]$) \\
-3-label  & 0.549 $\pm$ 0.010 & 0.477 $\pm$ 0.025 & 0.545 $\pm$ 0.007 & 0.460 $\pm$ 0.018 & $+0.017$ ($[-0.022, +0.062]$) \\
-
-\midrule
-
-Binary (1B) & 0.652 $\pm$ 0.016 & 0.652 $\pm$ 0.016 & 0.677 $\pm$ 0.008 & 0.676 $\pm$ 0.008 & \textbf{$-0.024$ ($[-0.062, -0.003]$)} \\
-3-label & 0.574 $\pm$ 0.007 & 0.505 $\pm$ 0.012 & 0.587 $\pm$ 0.014 & 0.529 $\pm$ 0.012 & \textbf{$-0.024$ ($[-0.055, -0.001]$)} \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-At the 270M scale, the two approaches perform similarly, with
-confidence intervals overlapping across all reported metrics --- both
-confidence intervals in Table~\ref{tab:main270m} include zero. At the
-larger 1B scale, reasoning supervision consistently improves
-policy transfer, at both label spaces (95\% CI excludes zero,
-10/10 seeds each; the same effect size, macro-F1 delta $\approx
--0.024$, appearing independently at 3-label and binary), indicating that
-additional reasoning signals help the student more closely reproduce
-teacher behavior.
-
-However, improved policy transfer does not consistently translate
-into improved routing accuracy. At 1B, reasoning-augmented
-distillation's end-to-end accuracy is slightly \emph{lower} than
-route-only's at both label spaces (0.379 vs.\ 0.387, 3-label; 0.405 vs.\
-0.408, binary --- \ref{sec:can-be-distilled}), the opposite direction
-from its confirmed fidelity advantage. A single-configuration study
-would have reported one of the two 270M/1B outcomes as the general
-answer; overall, reasoning supervision appears to improve
-policy transfer imitation at larger scales but does not consistently
-improve routing correctness.
-
-\subsection{Distilled Routers Surpass Teacher Routing Accuracy}
-\label{sec:distillation-improves-teacher}
-
-A notable observation is that distilled routers frequently achieve
-higher oracle accuracy than the teacher used to generate their
-supervision. Under the primary binary-routing setting, the teacher
-achieves 0.592 oracle accuracy, whereas the distilled routers achieve
-0.682--0.692. Because both numbers are measured against the same
-ground truth, this comparison is not confounded by any difference
-between the teacher's and the oracle's label distributions --- it is a
-direct, apples-to-apples statement that the student's routing
-decisions are more often correct than the teacher's own.
-
-\begin{table}[h]
-\centering
-\caption{\textbf{Policy Transfer vs. Routing Accurac}, accuracy,
-mean $\pm$ SD across 10 seeds, all four configurations. Within every
-row, agreement with the oracle exceeds agreement with the teacher.}
-\label{tab:teacher-oracle-accuracy}
-\small
 \begin{tabular}{@{}llrr@{}}
 \toprule
-Configuration & Variant & Acc vs.\ Teacher & Acc vs.\ Oracle \\
+Configuration & Variant & Latency (ms) & Speedup \\
 \midrule
-\multirow{2}{*}{Binary (270M)} & Route-only & 0.652 $\pm$ 0.005 & 0.682 $\pm$ 0.011 \\
- & Reasoning-plus-route & 0.645 $\pm$ 0.011 & 0.692 $\pm$ 0.008 \\
+\multirow{2}{*}{270M, Three-Label} & Route-only & 10.6 & 153× \\
+ & Reasoning-plus-route & 11.2 & 145× \\
+\midrule
+\multirow{2}{*}{1B, Three-Label} & Route-only & 20.8 & 78× \\
+ & Reasoning-plus-route & 22.4 & 72× \\
 \addlinespace
-\multirow{2}{*}{3-label} & Route-only & 0.549 $\pm$ 0.010 & 0.636 $\pm$ 0.016 \\
- & Reasoning-plus-route & 0.545 $\pm$ 0.007 & 0.645 $\pm$ 0.015 \\
- \midrule
-\addlinespace
-\multirow{2}{*}{Binary (1B)} & Route-only & 0.652 $\pm$ 0.016 & 0.676 $\pm$ 0.014 \\
- & Reasoning-plus-route & 0.677 $\pm$ 0.008 & 0.679 $\pm$ 0.011 \\
- \addlinespace
-\multirow{2}{*}{3-label} & Route-only & 0.574 $\pm$ 0.007 & 0.633 $\pm$ 0.010 \\
- & Reasoning-plus-route & 0.587 $\pm$ 0.014 & 0.629 $\pm$ 0.009 \\
+\multirow{2}{*}{1B, Binary} & Route-only & 20.8 & 78× \\
+ & Reasoning-plus-route & 22.3 & 73× \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-This pattern also appears across the remaining routing configurations
---- Table~\ref{tab:teacher-oracle-accuracy} shows it holds within
-every one of the eight configuration/variant pairs, not just the
-primary one. This comparison alone is suggestive but not conclusive on
-its own: the teacher and the oracle have different label distributions
-with different majority-class baselines, so part of a within-student
-gap between the two columns could reflect that difference rather than
-genuine correction. The controlled comparison above (teacher's own
-oracle accuracy vs.\ the students', same reference for both) is what
-actually establishes the claim; Table~\ref{tab:teacher-oracle-accuracy}
-shows it is not an artifact of the primary configuration alone.
-
-This result suggests that the student is not merely memorizing teacher
-decisions. Error analysis indicates that the teacher systematically
-under-predicts queries requiring the \texttt{large} category, correctly
-identifying only 49.6\% of queries that actually required the
-large-tier candidate against the oracle (\ref{sec:error-analysis}),
-whereas the distilled routers recover a substantially larger fraction
-of these cases (68.6--70.7\% large-tier recall against the same
-reference).
-
-\begin{figure}[h]
-\centering
-\caption{\textbf{Teacher vs.\ Student, Both Against Oracle Ground
-Truth} (binary label space). Row-normalized recall; ``Student'' is
-route-only, this paper's primary configuration. On \texttt{large}-tier
-queries (bottom row), the teacher is close to a coin flip
-(49.6\% correct), while the student correctly escalates 68.6\% of the
-time --- the same under-escalation-then-recovery pattern reported in
-prose above, shown directly.}
-\label{fig:confusion-teacher-vs-student}
-\vspace{4pt}
-
-\includegraphics[width=0.65\linewidth]{figures/fig_confusion_teacher_vs_student.png}
-\end{figure}
-
-This is not the student reproducing a teacher error
-pattern faithfully; it is the student learning a different, more
-accurate escalation boundary than the one the teacher demonstrated.
-
-One possible explanation is that distillation acts as a form of
-regularization, encouraging the student to learn a smoother, more
-generalizable approximation of the routing boundary than any single
-set of individual teacher decisions. Understanding this phenomenon
-remains an important direction for future work.
-
-\subsection{Policy Transfer Does Not Predict Routing Accuracy}
-\label{sec:teacher-fidelity-oracle}
-\label{sec:fidelity-oracle-270m}
-
-This section reports a supporting evaluation insight, not this paper's
-main contribution: does higher policy transfer imply higher routing accuracy? We
-compare each variant's policy transfer against
-its routing accuracy against oracle labels.
-
-\begin{table}[h]
-\centering
-\caption{\textbf{Policy Transfer vs Routing Accuracy (Macro-F1)}, mean $\pm$ SD across 10
-seeds per configuration. \textbf{Bold} marks the higher-scoring
-variant in each column, within each configuration.}
-\label{tab:oracle270m}
-\small
-\begin{tabular}{@{}llrr@{}}
-\toprule
-Configuration & Variant & Teacher F1 & Oracle F1 \\
-\midrule
-\multirow{2}{*}{Binary (270M)}
- & Route-only & \textbf{0.651 $\pm$ 0.005} & 0.667 $\pm$ 0.010 \\
- & Reasoning-plus-route & 0.645 $\pm$ 0.010 & \textbf{0.675 $\pm$ 0.007} \\
-\addlinespace
-\multirow{2}{*}{3-label}
- & Route-only & \textbf{0.477 $\pm$ 0.025} & 0.435 $\pm$ 0.005 \\
- & Reasoning-plus-route & 0.460 $\pm$ 0.018 & \textbf{0.436 $\pm$ 0.008} \\
-\addlinespace
-\midrule
-\addlinespace
-\multirow{2}{*}{Binary (1B)}
- & Route-only & 0.652 $\pm$ 0.016 & 0.658 $\pm$ 0.011 \\
- & Reasoning-plus-route & \textbf{0.676 $\pm$ 0.008} & \textbf{0.662 $\pm$ 0.007} \\
- \multirow{2}{*}{3-label }
- & Route-only & 0.505 $\pm$ 0.012 & \textbf{0.440 $\pm$ 0.007} \\
- & Reasoning-plus-route & \textbf{0.529 $\pm$ 0.012} & 0.434 $\pm$ 0.009 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{figure}[h]
-\centering
-\caption{\textbf{Policy Transfer Does Not Predict Routing Accuracy.}
-Teacher F1 (x-axis, fidelity) vs.\ oracle F1 (y-axis, correctness) for
-route-only (RO) and reasoning-plus-route (RR), at all four
-configurations --- 270M (circles) and 1B (squares), binary (filled)
-and 3-label (hollow) --- the full rows of Table~\ref{tab:oracle270m}.
-Dashed connectors join same-configuration pairs. Error bars are $\pm
-1$ SD across 10 seeds.}
-\label{fig:fidelity-vs-correctness}
-\vspace{4pt}
-
-\includegraphics[width=0.6\linewidth]{figures/fig_fidelity_vs_correctness.png}
-\end{figure}
-
-Across multiple configurations, the model variant with higher teacher
-agreement does not necessarily achieve higher oracle agreement: at
-three of the four configurations, the variant with higher teacher-F1
-has \emph{lower} oracle-F1; at the fourth (binary/1B) the two rankings
-agree, but the correctness gap is still not statistically reliable.
-In particular, reasoning-augmented distillation improves fidelity at
-the 1B scale but does not consistently improve correctness --- across
-all four configurations, no configuration shows a statistically
-reliable oracle-correctness advantage for either variant, even at the
-two 1B configurations where the fidelity advantage is confirmed
-(\ref{sec:main-result}).
-
-To put this observation on statistical footing rather than relying on
-the eight-point scatter alone, we compute the correlation between
-teacher-agreement F1 and oracle F1. A naive Pearson correlation across
-all eight configuration/variant points is strongly positive
-($r = +0.97$, $p < 0.001$) --- but this is a structural confound, not
-evidence that fidelity predicts correctness: binary-label-space
-configurations score higher than 3-label configurations on \emph{both}
-axes simply because binary is the easier classification problem
-(Table~\ref{tab:oracle270m}), inflating the pooled correlation without
-reflecting any relationship within a fixed configuration. Controlling
-for label space --- a partial Pearson correlation over all 80
-individual seed runs (10 seeds $\times$ 8 configuration/variant pairs),
-residualizing both metrics against a binary-vs.-3-label indicator ---
-removes this confound and eliminates the association: $r = -0.16$
-($p = 0.17$, $n = 80$). The more direct test correlates the
-reasoning-vs.-route-only \emph{change} in fidelity against the
-corresponding change in oracle F1, one point per configuration
-($n = 4$): Pearson $r = -0.45$ ($p = 0.55$); Spearman
-$\rho = 0.00$ ($p = 1.0$) --- the ranking of which configurations gain
-the most fidelity from reasoning supervision carries no information
-about which configurations gain the most routing accuracy. All three
-tests agree once the label-space confound is removed: the null
-correlation visible in Figure~\ref{fig:fidelity-vs-correctness} is not
-an artifact of a sparse scatter.
-
-These results indicate that policy transfer and routing accuracy capture different aspects of routing behavior. Consequently,
-policy transfer alone should not be used as a proxy for
-routing accuracy; independent evaluation against oracle routing labels
-remains necessary when assessing routing-policy transfer methods.
+This holds across every evaluated configuration (Tables~\ref{tab:mainperf}
+and~\ref{tab:efficiency}): label-space granularity has little effect on
+latency, and although scaling the backbone from 270M to 1B costs more,
+substantial efficiency gains over the teacher remain.
 
 \subsection{Scaling Analysis}
 \label{sec:effect-of-scale}
@@ -757,113 +703,104 @@ remains necessary when assessing routing-policy transfer methods.
 \label{sec:label-space-granularity}
 
 We next examine whether routing policy changes when scaling the
-student backbone from 270M to 1B parameters, at both label spaces this
-paper tests, completing the full 2$\times$2 grid (label space $\times$
-backbone).
+distilled-router backbone from 270M to 1B, at both label spaces,
+completing the full 2×2 grid (label space $\times$ backbone). For the
+most part, it does not.
 
-\begin{table}[h]
-\centering
-\caption{\textbf{Scaling.} Macro-F1 against oracle labels, mean
-$\pm$ SD across 10 seeds. \textbf{Bold} marks the higher-scoring
-variant at each backbone, within each label space.}
-\label{tab:scaling}
-\begin{tabular}{@{}lllr@{}}
-\toprule
-Label Space & Backbone & Variant & Oracle F1 \\
-\midrule
-3-label & 270M & Route-only & 0.435 $\pm$ 0.005 \\
- &  & Reasoning-plus-route & \textbf{0.436 $\pm$ 0.008} \\
- 3-label & 1B & Route-only & \textbf{0.440 $\pm$ 0.007} \\
- &  & Reasoning-plus-route & 0.434 $\pm$ 0.009 \\
-\midrule
-Binary & 270M & Route-only & 0.667 $\pm$ 0.010 \\
- &  & Reasoning-plus-route & \textbf{0.675 $\pm$ 0.007} \\
-Binary & 1B & Route-only & 0.658 $\pm$ 0.011 \\
- & & Reasoning-plus-route & \textbf{0.662 $\pm$ 0.007} \\
-\bottomrule
-\end{tabular}
-\end{table}
+Increasing model size produces only modest, noise-level changes in
+oracle-measured accuracy in either direction (Oracle F1 column,
+Table~\ref{tab:teacher-oracle-accuracy}): at three-label, route-only and
+reasoning-plus-route distillation essentially swap rank between 270M
+and 1B, landing well within one standard deviation of each other
+throughout; at binary, both variants drift slightly lower from 270M to
+1B, a small dip rather than a genuine crossover. In neither label
+space does increasing router size produce a reliable routing-accuracy
+advantage.
 
-Increasing model size produces only modest changes in oracle-measured
-routing accuracy. At 3-label, the two variants' lines essentially
-swap places --- route-only edges ahead at 1B, having trailed at 270M
---- landing within 0.006 macro-F1 of each other at every point, well
-inside one standard deviation. At binary, both variants move in the
-\emph{same} direction: oracle F1 drops slightly for both route-only
-($0.667 \to 0.658$) and reasoning-plus-route ($0.675 \to 0.662$) going
-from 270M to 1B --- a small, same-direction dip rather than a
-crossover, again well within noise. Across both routing formulations,
-differences between the 270M and 1B students remain small relative to
-run-to-run variability; no configuration demonstrates a consistent
-routing-accuracy advantage from increasing router size.
-
-In contrast, the positive effect of reasoning supervision on
-policy transfer becomes more apparent at the 1B scale
-(Table~\ref{tab:main270m}). This trend suggests that larger students
-are better able to absorb additional supervisory signals, even when
-those signals do not improve routing correctness. Overall, the results
-imply that routing may be a relatively low-capacity prediction problem
-for which compact student models are already sufficient, performance
-is limited more by the quality of supervision (\ref{sec:main-result})
-than by the size of the student model, which is encouraging from a
-deployment perspective.
+Interestingly, model size matters for one thing: the association
+between reasoning supervision and policy transfer grows more apparent
+at 1B (Table~\ref{tab:main270m}), suggesting larger routers better
+absorb extra supervisory signal even when that signal does not improve
+routing correctness. Taken together, these results imply routing may
+be a low-capacity prediction problem for which lightweight models already
+suffice, with performance limited more by the quality of supervision
+(\ref{sec:main-result}) than by model size — encouraging news for
+deployment.
 
 \subsection{Error Analysis}
 \label{sec:error-analysis}
 
-To better understand routing policy, we analyze confusion matrices
-aggregated across all test predictions under the binary-routing
-formulation, pooling every test-set prediction across all 10 seeds and
-both datasets ($n = 10{,}000$ per variant) against oracle labels.
+To understand routing policy better, we analyze confusion matrices
+pooling every test prediction across all 10 seeds and both datasets
+($n = 10{,}000$ per variant) under the binary-routing formulation,
+against oracle labels. The pattern is consistent: distillation's gains
+concentrate in one specific failure mode rather than spreading evenly
+across all decisions.
 
-Against the oracle, the teacher itself under-escalates (large-tier
-recall only 49.6\%, barely better than chance); both distilled
-variants correct this specifically (68.6--70.7\% large-tier recall
-vs.\ oracle), trading back some small-tier recall in exchange ---
-explaining much of the routing-accuracy improvement observed throughout
-Section~\ref{sec:can-be-distilled}. Apart from this correction, the two
-distilled variants display highly similar error patterns (no cell
-differs by more than $\sim$1.2 points). A smaller, related asymmetry
-shows up against the teacher's own decision rather than the oracle: a
-distilled model over-escalates (small$\to$large, 42--44\%) more than
-it under-escalates (large$\to$small, 22--24\%) --- an ``err toward the
-safer, more expensive tier'' bias that is separate from, and smaller
-than, the oracle-referenced correction above. The remaining errors
-largely reflect ambiguity near routing boundaries, where queries can
-reasonably be assigned to either lower-cost or higher-capability
-models.
+\begin{figure}[h]
+\centering
+\caption{\textbf{Teacher vs.\ Distilled Router, Both Against Oracle Ground
+Truth} (binary label space). Row-normalized recall; ``Distilled Router'' is
+route-only, this paper's primary configuration. On \texttt{large}-tier
+queries (bottom row), the teacher is close to a coin flip
+(49.6\% correct), while the distilled router correctly escalates 68.6\%
+of the time.}
+\label{fig:confusion-teacher-vs-student}
+\vspace{4pt}
 
-These findings suggest that the primary benefit of distillation is not
-broad improvement across all routing decisions, but rather correction
-of a specific and important failure mode present in the teacher
-router.
-\section{Limitations}
-\label{sec:limitations}
+\includegraphics[width=0.65\linewidth]{figures/fig_confusion_teacher_vs_student.png}
+\end{figure}
 
-This study has several limitations. First, experiments are restricted to mathematical reasoning benchmarks, and the extent to which routing-policy distillation generalizes to other domains such as coding, instruction following, or open-domain question answering remains unverified. Second, DistillRouter is evaluated using a single teacher router and prompting strategy; alternative teacher policies may exhibit different transfer characteristics. Third, our scaling analysis includes only two student model sizes, limiting conclusions about how routing-policy distillation behaves across broader capacity ranges. Finally, reasoning is studied exclusively as a training-time supervision signal, and we do not investigate its interaction with inference-time reasoning-based routing methods. These limitations provide several directions for future work.
+Against the oracle, the teacher itself under-escalates on large-tier
+queries at essentially chance level
+(Figure~\ref{fig:confusion-teacher-vs-student}). Both distilled
+variants correct this specifically, recovering the large majority of
+those large-tier queries at the cost of trading back a little
+small-tier recall — this correction explains much of the accuracy
+improvement reported in Section~\ref{sec:can-be-distilled}. Apart from
+it, the two variants show highly similar error patterns. A smaller,
+related asymmetry appears against the teacher's own decisions rather
+than the oracle: a distilled model over-escalates roughly twice as
+often as it under-escalates (42--44\% vs.\ 22--24\%), an ``err toward
+the safer, more expensive tier'' bias that is separate from, and
+smaller than, the oracle-referenced correction above. The remaining
+errors largely reflect ambiguity near routing boundaries, where
+queries could reasonably go either way.
 
-\section{Conclusion}
-\label{sec:conclusion}
+These findings suggest distillation's primary benefit is not broad
+improvement across all routing decisions, but correction of one
+specific, important failure mode in the teacher.
 
-We presented DistillRouter, a routing-policy distillation framework for efficient LLM routing. DistillRouter transfers routing policy from an expensive teacher router into a lightweight student model, enabling routing decisions through a single forward pass. Across multiple routing configurations, distilled routers consistently improved routing quality relative to the teacher while reducing routing latency by up to 150×. We further found that reasoning supervision improves policy transfer at larger scales but does not consistently improve routing correctness. Overall, our results demonstrate that routing policies can be effectively compressed through knowledge distillation, making lightweight routers a practical solution for large-scale LLM deployment.
+\subsection{Correlation Test Details}
+\label{sec:correlation-appendix}
 
-\bibliographystyle{plainnat}
-\bibliography{references}
-
-
-
-\appendix
-\section{Appendix}
-\label{sec:appendix}
-
-The checks below are single-seed diagnostics, not held to the ten-seed
-standard used throughout the main body.
+We run three successively stricter correlation tests between
+teacher-agreement F1 and oracle F1 to confirm the null relationship
+reported in Section~\ref{sec:teacher-fidelity-oracle} is not an
+artifact of the eight-point scatter. A naive Pearson correlation
+across all eight points is strongly positive ($r = +0.97$,
+$p < 0.001$), but this turns out to be a structural confound rather
+than evidence that fidelity predicts correctness: binary-label-space
+configurations score higher than three-label ones on \emph{both} axes
+simply because binary is the easier problem
+(Table~\ref{tab:teacher-oracle-accuracy}), inflating the pooled correlation without
+reflecting any within-configuration relationship. Controlling for
+label space removes it: a partial Pearson correlation over all 80
+individual seed runs (10 seeds $\times$ 8 configuration/variant pairs)
+residualized against a binary-vs.-three-label indicator collapses to
+$r = -0.16$ ($p = 0.17$, $n = 80$). A more direct test confirms this,
+correlating the reasoning-vs.-route-only \emph{change} in fidelity
+against the corresponding change in oracle F1, one point per
+configuration ($n = 4$): Pearson $r = -0.45$ ($p = 0.55$); Spearman
+$\rho = 0.00$ ($p = 1.0$) — which configurations gain the most fidelity
+carries no information about which gain the most accuracy. All three
+tests agree once the label-space confound is removed.
 
 \subsection{Loss Weight Sweep}
 \label{sec:loss-weighting}
 
 $\lambda_{\text{reason}} \in \{0.5, 1.0\}$ was swept at the 1B
-backbone, 3-label label space, single seed (42), best epoch per setting
+backbone, three-label label space, single seed (42), best epoch per setting
 (validation macro-F1): $\lambda_{\text{reason}} = 0.5$ reaches
 $0.548$, $\lambda_{\text{reason}} = 1.0$ reaches $0.541$. $0.5$ was
 selected and used throughout this paper's reasoning-plus-route runs.
@@ -873,11 +810,11 @@ selected and used throughout this paper's reasoning-plus-route runs.
 
 An initialization bug (the classification head was built before the
 training seed was applied) produced a $0.060$ macro-F1 spread between
-two nominally identical runs --- roughly ten times the
+two nominally identical runs, roughly ten times the
 route-only/reasoning-plus-route gap at the primary configuration
 (Table~\ref{tab:main270m}). Fixed by seeding before model construction;
 even after the fix, two seeds at the same setting still differed by
-$0.023$ --- the motivation for the ten-seed protocol used throughout
+$0.023$: the motivation for the 10-seed protocol used throughout
 this paper.
 
 \subsection{Epoch-Count Robustness}
@@ -888,29 +825,32 @@ Every main-body result uses a 3-epoch budget
 20 epochs, both label spaces.
 
 Both label spaces peak well past epoch 3 (binary: route-only at epoch
-2, reasoning-plus-route at epoch 6; 3-label: epoch 5 and 8
+2, reasoning-plus-route at epoch 6; three-label: epoch 5 and 8
 respectively), with validation macro-F1 gains of $0.08$--$0.12$ over
 the 3-epoch checkpoint. On held-out test data, though, the gain is
-smaller and inconsistent: route-only/binary --- this paper's primary
-configuration --- is slightly \emph{worse} at its best 20-epoch
+smaller and inconsistent: route-only/binary (this paper's primary
+configuration) is slightly \emph{worse} at its best 20-epoch
 checkpoint (0.640) than the main protocol's 10-seed mean (0.651 $\pm$
-0.005); the other three configurations show modest gains within
+0.005); the other three configurations indicate modest gains within
 roughly one standard deviation.
 
 Because route-only/binary is this paper's primary configuration, we
-repeated it at 20 epochs across the same ten seeds used throughout the
+repeated it at 20 epochs across the same 10 seeds used throughout the
 main protocol, rather than relying on the single-seed check above.
 The 20-epoch test macro-F1 is $0.653 \pm 0.013$, against the 3-epoch
 main-protocol result of $0.651 \pm 0.005$ (Table~\ref{tab:main270m}).
-A paired seed-by-seed bootstrap over the ten matched seeds gives a
+A paired seed-by-seed bootstrap over the 10 matched seeds gives a
 mean improvement of $+0.002$ macro-F1 with a 95\% CI of
-$[-0.006, +0.011]$, which includes zero: six of the ten seeds are
+$[-0.006, +0.011]$, which includes zero: six of the 10 seeds are
 lower at 20 epochs than at 3 epochs, and seed-to-seed variance nearly
 triples ($\pm 0.013$ vs.\ $\pm 0.005$). Extending training therefore
 does not yield a reliable test-set improvement at this configuration,
 despite the consistent validation-macro-F1 gains observed above; this
 confirms the single-seed result was not an artifact of that one seed,
-and supports retaining the 3-epoch, ten-seed protocol as this paper's
+and supports retaining the 3-epoch, 10-seed protocol as this paper's
 main result.
+
+\newpage
+\input{checklist.tex}
 
 \end{document}

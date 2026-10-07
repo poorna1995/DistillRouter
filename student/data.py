@@ -141,16 +141,25 @@ def oversample_minority_tiers(
     by_tier = collections.defaultdict(list)
     for ex in examples:
         by_tier[ex.teacher_route].append(ex)
-    max_count = max(len(v) for v in by_tier.values())
+    before_counts = {tier: len(v) for tier, v in by_tier.items()}
+    max_count = max(before_counts.values())
     target = int(max_count * target_ratio)
 
     oversampled = []
-    for tier_examples in by_tier.values():
+    after_counts = {}
+    for tier, tier_examples in by_tier.items():
         if target <= len(tier_examples):
             oversampled.extend(tier_examples)  # already at/above target -- leave untouched
+            after_counts[tier] = len(tier_examples)
         else:
             reps, remainder = divmod(target, len(tier_examples))
             oversampled.extend(tier_examples * reps + tier_examples[:remainder])
+            after_counts[tier] = reps * len(tier_examples) + remainder
+
+    print(
+        f"oversample_minority_tiers(target_ratio={target_ratio}): {before_counts} -> {after_counts} "
+        f"({len(examples)} -> {len(oversampled)} total examples)"
+    )
     return oversampled
 
 

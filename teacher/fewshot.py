@@ -42,9 +42,19 @@ def load_fewshot_examples() -> list[tuple[Example, OracleLabel]]:
                 pool[label.routing_label].append((example, label))
 
     fewshot = []
+    per_tier_used = {}
     for tier in ROUTING_LABELS:
         candidates = sorted(pool[tier], key=lambda pair: not pair[1].succeeded)  # succeeded=True first
-        fewshot.extend(candidates[:FEWSHOT_PER_TIER])
+        selected = candidates[:FEWSHOT_PER_TIER]
+        fewshot.extend(selected)
+        per_tier_used[tier] = f"{len(selected)}/{FEWSHOT_PER_TIER}"
+
+    short_tiers = [tier for tier in ROUTING_LABELS if len(pool[tier]) < FEWSHOT_PER_TIER]
+    print(
+        f"load_fewshot_examples(): pool sizes {({t: len(v) for t, v in pool.items()})}, "
+        f"selected {per_tier_used}"
+        + (f" -- SHORT on {short_tiers} (fewer than {FEWSHOT_PER_TIER} available, using all there is)" if short_tiers else "")
+    )
     return fewshot
 
 
@@ -136,18 +146,25 @@ REASONING_EXTRACTOR_PREAMBLE = (
 )
 
 
-_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
+_JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")  # flat (non-nested) object -- same approach as
+                                              # common/scoring.py's extract_json_answer
 
 
 def _extract_json_dict(raw_text: str) -> dict | None:
-    match = _JSON_RE.search(raw_text)
-    if not match:
-        return None
-    try:
-        parsed = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    """Tries every flat {...} span in raw_text, most-recent first, returning
+    the first one that parses as valid JSON. A single greedy first-{-to-
+    last-} match (the previous approach) captures garbage and fails outright
+    if the model's completion has any stray brace before/after the real
+    JSON object -- this instead tolerates that the same way common/
+    scoring.py's extract_json_answer already does for candidate answers."""
+    for candidate_text in reversed(_JSON_OBJECT_RE.findall(raw_text)):
+        try:
+            parsed = json.loads(candidate_text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
 
 
 def parse_label_only_response(raw_text: str) -> str:
