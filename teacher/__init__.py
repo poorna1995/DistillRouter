@@ -1,10 +1,9 @@
 """Teacher labeling pipeline.
 
 - base.py           — TeacherModel ABC + registry.
-- qwen_teacher_v1.py — QwenTeacherV1 ("qwen2.5-3b-v1"), few-shot, label-only.
-                       Output: data/teacher/<dataset>/v1/<split>.jsonl.
-- qwen_teacher_v2.py — QwenTeacherV2 ("qwen2.5-3b-v2"), few-shot, label + reasoning.
-                       Output: data/teacher/<dataset>/v2/<split>.jsonl.
+- qwen_teacher.py   — QwenTeacher ("qwen2.5-14b"), binary, two-stage
+                       (reasoning, then few-shot label).
+                       Output: data/teacher/<dataset>/v3/<split>.jsonl.
 - fewshot.py        — shared few-shot loading, prompts, parsing, self-referential guard.
 - cache.py          — TeacherLabelCache, keyed on (query_id, prompt_version).
 - labeler.py        — label_dataset(): read -> cache-check -> dedupe -> predict -> cache.
@@ -13,10 +12,10 @@
                        pre-computed oracle label instead of calling a model.
                        Output: data/teacher/<dataset>/oracle_direct/<split>.jsonl.
 
-Both prompted teachers require real oracle-labeled calibration data to
+The prompted teacher requires real oracle-labeled calibration data to
 instantiate (see oracle/labeler.py) — there is no blind (no-few-shot)
 variant. Oracle labeling itself lives in oracle/, not here.
 """
 from teacher.base import available_teachers, get_teacher_class  # noqa: F401
 
-from teacher import oracle_baseline, qwen_teacher_v1, qwen_teacher_v2  # noqa: F401,E402
+from teacher import oracle_baseline, qwen_teacher  # noqa: F401,E402

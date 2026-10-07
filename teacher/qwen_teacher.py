@@ -1,10 +1,12 @@
-"""QwenTeacherV2 — two-stage, reasoning-first routing. Stage 1: one-sentence
-reasoning, zero-shot, route unknown. Stage 2: route from that reasoning,
-few-shot. See fewshot.py's docstring for why this order and shape.
-Output: data/teacher/<dataset>/v2/<split>.jsonl.
+"""QwenTeacher — the expensive router that is distilled. Two-stage,
+reasoning-first, binary (small/large). Stage 1: one-sentence reasoning,
+zero-shot, route unknown. Stage 2: route from that reasoning, few-shot.
+See fewshot.py's docstring for why this order and shape.
+Output: data/teacher/<dataset>/v3/<split>.jsonl.
 """
 from __future__ import annotations
 
+from common.config import TEACHER_MODEL
 from common.hf_generation import generate_chat_response, load_causal_lm
 from common.schema import Example, TeacherLabel
 from teacher.base import TeacherModel, register
@@ -21,14 +23,14 @@ from teacher.fewshot import (
 
 
 @register
-class QwenTeacherV2(TeacherModel):
-    name = "qwen2.5-3b-v2"
-    # v5: reasoning-first + one-sentence reasoning (~15-20 words, 50-token cap) + bars
-    # solution-plan leakage, not just computed results. See fewshot.py's docstring.
-    prompt_version = "qwen-twostage-reasoning-v5"
-    output_version = "v2"
+class QwenTeacher(TeacherModel):
+    name = "qwen2.5-14b"
+    # binary-v1: small/large only, models described by size. Reasoning stage
+    # unchanged from the submitted teacher (one sentence, 50-token cap).
+    prompt_version = "binary-twostage-v1"
+    output_version = "v3"
     fewshot_source_split = FEWSHOT_SOURCE_SPLIT
-    MODEL_ID = "Qwen/Qwen2.5-3B-Instruct"
+    MODEL_ID = TEACHER_MODEL
     REASONING_MAX_NEW_TOKENS = 50   # stage 1: one short sentence + JSON syntax
     ROUTE_MAX_NEW_TOKENS = 60       # stage 2: just a label, same as QwenTeacherV1
 

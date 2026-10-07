@@ -1,7 +1,7 @@
-"""Shared code for QwenTeacherV1/V2: few-shot loading, prompt text,
-response parsing, self-referential guard.
+"""Shared code for the teacher: few-shot loading, prompt text, response
+parsing, self-referential guard.
 
-What: QwenTeacherV2 is two-stage. How: Stage 1 extracts one-sentence
+What: the teacher is two-stage. How: Stage 1 extracts one-sentence
 reasoning, zero-shot, route not yet known; Stage 2 predicts the route
 from it, few-shot. Why: reasoning generated after the route would just
 rationalize an answer already picked, not drive it. Stage 1 has no
@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 
-from common.config import ORACLE_DIR, PROCESSED_DIR, ROUTING_LABELS
+from common.config import LABELS, ORACLE_DIR, PROCESSED_DIR
 from common.schema import Example, OracleLabel, read_jsonl, read_oracle_labels
 
 FEWSHOT_PER_TIER = 2  # demonstration examples per tier, pooled across every oracle-labeled dataset
@@ -25,10 +25,9 @@ FEWSHOT_SOURCE_SPLIT = "calibration"  # split load_fewshot_examples() draws demo
 
 
 def load_fewshot_examples() -> list[tuple[Example, OracleLabel]]:
-    """Up to FEWSHOT_PER_TIER demonstrations per tier, pooled across every
-    oracle-labeled dataset, preferring genuinely-succeeded examples over
-    fallback-defaulted ones."""
-    pool: dict[str, list[tuple[Example, OracleLabel]]] = {tier: [] for tier in ROUTING_LABELS}
+    """Up to FEWSHOT_PER_TIER demonstrations per label, pooled across every
+    oracle-labeled dataset. Unsolvable questions (no oracle label) are skipped."""
+    pool: dict[str, list[tuple[Example, OracleLabel]]] = {tier: [] for tier in LABELS}
     for dataset_dir in sorted(p for p in ORACLE_DIR.glob("*") if p.is_dir()):
         labels_path = dataset_dir / f"{FEWSHOT_SOURCE_SPLIT}.labels.jsonl"
         if not labels_path.exists():
@@ -38,18 +37,17 @@ def load_fewshot_examples() -> list[tuple[Example, OracleLabel]]:
         examples_by_id = {ex.id: ex for ex in read_jsonl(examples_path)}
         for label in read_oracle_labels(labels_path):
             example = examples_by_id.get(label.query_id)
-            if example is not None:
+            if example is not None and label.routing_label is not None:
                 pool[label.routing_label].append((example, label))
 
     fewshot = []
     per_tier_used = {}
-    for tier in ROUTING_LABELS:
-        candidates = sorted(pool[tier], key=lambda pair: not pair[1].succeeded)  # succeeded=True first
-        selected = candidates[:FEWSHOT_PER_TIER]
+    for tier in LABELS:
+        selected = pool[tier][:FEWSHOT_PER_TIER]
         fewshot.extend(selected)
         per_tier_used[tier] = f"{len(selected)}/{FEWSHOT_PER_TIER}"
 
-    short_tiers = [tier for tier in ROUTING_LABELS if len(pool[tier]) < FEWSHOT_PER_TIER]
+    short_tiers = [tier for tier in LABELS if len(pool[tier]) < FEWSHOT_PER_TIER]
     print(
         f"load_fewshot_examples(): pool sizes {({t: len(v) for t, v in pool.items()})}, "
         f"selected {per_tier_used}"
@@ -73,8 +71,7 @@ def load_fewshot_examples_or_raise(teacher_name: str) -> list[tuple[Example, Ora
 
 def format_fewshot_block(fewshot: list[tuple[Example, OracleLabel]]) -> str:
     """Render fewshot as the "Problem: ... {"teacher_route": ...}"
-    label-only demonstration block, used by both QwenTeacherV1 and
-    QwenTeacherV2's route stage."""
+    label-only demonstration block, used by the teacher's route stage."""
     blocks = []
     for example, label in fewshot:
         target = {"teacher_route": label.routing_label}
@@ -103,21 +100,20 @@ _ROLE_INTRO = "You are the teacher router for DistillRouter.\n\n"
 
 LABEL_ONLY_SYSTEM_PREAMBLE = (
     _ROLE_INTRO +
-    "Your task is to choose the cheapest model tier that can answer the given query "
-    "reliably. Do NOT solve the query.\n\n"
+    "Your task is to decide whether a small model is enough to answer the given query "
+    "correctly, or whether a large model is needed. Do NOT solve the query.\n\n"
 
-    "Available model tiers:\n"
-    "- small: suitable for simple retrieval, direct reasoning, and short single-step tasks.\n"
-    "- medium: suitable for standard multi-step reasoning and moderate context integration.\n"
-    "- large: suitable for long reasoning chains, advanced logical reasoning, complex symbolic "
-    "reasoning, multiple interacting constraints, ambiguous instructions, and complex synthesis.\n\n"
+    "Available models:\n"
+    "- small: a ~1-2B parameter model; reliable on short, direct, single- or few-step problems.\n"
+    "- large: a ~14B parameter model; needed for long reasoning chains, advanced or symbolic "
+    "reasoning, and multiple interacting constraints.\n\n"
 
     "If reasoning requirements for the query are given below, base your decision on them alone "
-    "rather than re-deriving your own. Choose the CHEAPEST tier the reasoning requirements "
-    "justify as sufficient to answer the query correctly.\n\n"
+    "rather than re-deriving your own. Choose small whenever the reasoning requirements "
+    "justify it as sufficient to answer the query correctly.\n\n"
 
     "Return JSON only:\n"
-    "{\"teacher_route\": \"small|medium|large\"}"
+    "{\"teacher_route\": \"small|large\"}"
 )
 
 
@@ -146,8 +142,7 @@ REASONING_EXTRACTOR_PREAMBLE = (
 )
 
 
-_JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")  # flat (non-nested) object -- same approach as
-                                              # common/scoring.py's extract_json_answer
+_JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")  # flat (non-nested) object
 
 
 def _extract_json_dict(raw_text: str) -> dict | None:
@@ -173,7 +168,7 @@ def parse_label_only_response(raw_text: str) -> str:
     parsed = _extract_json_dict(raw_text)
     if parsed:
         label = parsed.get("teacher_route")
-        if label in ROUTING_LABELS:
+        if label in LABELS:
             return label
     return "large"
 

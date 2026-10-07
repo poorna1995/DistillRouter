@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """DistillRouter — single entry point for the project.
 
-Pipeline: oracle-label (ground truth) -> label-data (teacher, v1/v2) ->
-build-student-data (join query + teacher output) -> train-student-{
-classifier,dual} (Experiment 1: route-only / Experiment 2: route +
-reasoning, dual-head) -> select-router-checkpoint (validation-only
-selection) -> evaluate-router (test, once).
+Pipeline: oracle-label (ground truth) -> label-data (teacher) ->
+build-student-data (join query + teacher output) -> train-student-{classifier,dual}
+(route-only / reasoning-plus-route students) -> select-router-checkpoint
+(validation-only selection) -> evaluate-router (test, once).
 
 Usage:
     python run.py list-datasets
@@ -15,21 +14,21 @@ Usage:
     python run.py check-splits --all
 
     python run.py list-teachers
-    python run.py label-data --dataset gsm8k --teacher qwen2.5-3b-v2
+    python run.py label-data --dataset gsm8k --teacher qwen2.5-14b
     python run.py label-data --all --split train validation
 
     python run.py oracle-label --dataset gsm8k --split calibration
     python run.py oracle-label --all --split calibration
 
-    python run.py build-student-data --all --teacher qwen2.5-3b-v2
+    python run.py build-student-data --all --teacher qwen2.5-14b
 
-    python run.py train-student-classifier --all --teacher qwen2.5-3b-v2
-    python run.py train-student-dual --all --teacher qwen2.5-3b-v2
+    python run.py train-student-classifier --all --teacher qwen2.5-14b
+    python run.py train-student-dual --all --teacher qwen2.5-14b
 
     python run.py select-router-checkpoint --variant classifier \\
-        --checkpoint-root checkpoints/student-classifier --all --teacher qwen2.5-3b-v2
+        --checkpoint-root checkpoints/student-classifier --all --teacher qwen2.5-14b
     python run.py evaluate-router --variant classifier \\
-        --checkpoint-dir checkpoints/student-classifier-best --all --teacher qwen2.5-3b-v2 --split test
+        --checkpoint-dir checkpoints/student-classifier-best --all --teacher qwen2.5-14b --split test
 
 New subcommands go in build_parser() below rather than new top-level scripts.
 """
@@ -37,7 +36,11 @@ from __future__ import annotations
 
 import argparse
 
-from dataset import datasets, get_loader_class
+from common.config import (
+    STUDENT_MODEL_ID, EPOCHS, LAMBDA_REASON, LAMBDA_ROUTE, LEARNING_RATE, LR_SCHEDULER,
+    OVERSAMPLE_RATIO, ROUTE_HEAD_DROPOUT, ROUTE_LOSS, WARMUP_RATIO,
+)
+from dataset import datasets, get_loader_class, training_datasets
 
 
 def cmd_list_datasets(_args: argparse.Namespace) -> None:
@@ -124,7 +127,7 @@ def cmd_build_student_data(args: argparse.Namespace) -> None:
     from student.data import build_distillation_dataset
     from teacher.base import get_teacher_class  # lazy: pulls in torch/transformers at import time
 
-    targets = datasets() if args.all else args.dataset
+    targets = training_datasets() if args.all else args.dataset
     if not targets:
         print("Nothing to do: pass --dataset <name> [<name> ...] or --all.")
         return
@@ -136,28 +139,14 @@ def cmd_build_student_data(args: argparse.Namespace) -> None:
             )
 
 
-def cmd_build_binary_student_data(args: argparse.Namespace) -> None:
-    from student.data import build_binary_distillation_dataset
-    from teacher.base import get_teacher_class  # lazy: pulls in torch/transformers at import time
-
-    targets = datasets() if args.all else args.dataset
-    if not targets:
-        print("Nothing to do: pass --dataset <name> [<name> ...] or --all.")
-        return
-    teacher_cls = get_teacher_class(args.teacher)
-    for name in targets:
-        for split in args.split:
-            build_binary_distillation_dataset(name, output_version=teacher_cls.output_version, split=split)
-
-
 def cmd_train_student_dual(args: argparse.Namespace) -> None:
     from pathlib import Path
 
     from common.config import PROJECT_ROOT
-    from student.train_dual import DEFAULT_STUDENT_MODEL_ID, train_student_dual
+    from student.train_dual import train_student_dual
     from teacher.base import get_teacher_class  # lazy: pulls in torch/transformers at import time
 
-    targets = datasets() if args.all else args.dataset
+    targets = training_datasets() if args.all else args.dataset
     if not targets:
         print("Nothing to do: pass --dataset <name> [<name> ...] or --all.")
         return
@@ -169,7 +158,7 @@ def cmd_train_student_dual(args: argparse.Namespace) -> None:
         targets,
         teacher_cls.output_version,
         checkpoint_dir,
-        model_id=args.model_id or DEFAULT_STUDENT_MODEL_ID,
+        model_id=args.model_id or STUDENT_MODEL_ID,
         split=args.split,
         num_train_epochs=args.epochs,
         learning_rate=args.learning_rate,
@@ -179,8 +168,8 @@ def cmd_train_student_dual(args: argparse.Namespace) -> None:
         lambda_reason=args.lambda_reason,
         route_head_dropout=args.route_head_dropout,
         oversample_ratio=args.oversample_ratio,
+        loss_mode=args.route_loss,
         seed=args.seed,
-        label_space=args.label_space,
     )
 
 
@@ -188,10 +177,10 @@ def cmd_train_student_classifier(args: argparse.Namespace) -> None:
     from pathlib import Path
 
     from common.config import PROJECT_ROOT
-    from student.train_classifier import DEFAULT_STUDENT_MODEL_ID, train_student_classifier
+    from student.train_classifier import train_student_classifier
     from teacher.base import get_teacher_class  # lazy: pulls in torch/transformers at import time
 
-    targets = datasets() if args.all else args.dataset
+    targets = training_datasets() if args.all else args.dataset
     if not targets:
         print("Nothing to do: pass --dataset <name> [<name> ...] or --all.")
         return
@@ -203,7 +192,7 @@ def cmd_train_student_classifier(args: argparse.Namespace) -> None:
         targets,
         teacher_cls.output_version,
         checkpoint_dir,
-        model_id=args.model_id or DEFAULT_STUDENT_MODEL_ID,
+        model_id=args.model_id or STUDENT_MODEL_ID,
         split=args.split,
         num_train_epochs=args.epochs,
         learning_rate=args.learning_rate,
@@ -211,8 +200,8 @@ def cmd_train_student_classifier(args: argparse.Namespace) -> None:
         lr_scheduler_type=args.lr_scheduler_type,
         route_head_dropout=args.route_head_dropout,
         oversample_ratio=args.oversample_ratio,
+        loss_mode=args.route_loss,
         seed=args.seed,
-        label_space=args.label_space,
     )
 
 
@@ -253,7 +242,7 @@ def cmd_select_router_checkpoint(args: argparse.Namespace) -> None:
         from student.train_dual import load_dual_head_checkpoint, predict_route
         load_fn = load_dual_head_checkpoint
 
-    targets = datasets() if args.all else args.dataset
+    targets = training_datasets() if args.all else args.dataset
     if not targets:
         print("Nothing to do: pass --dataset <name> [<name> ...] or --all.")
         return
@@ -364,33 +353,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_build_student_data.set_defaults(func=cmd_build_student_data)
 
-    p_build_binary_student_data = subparsers.add_parser(
-        "build-binary-student-data",
-        help="Derive a binary-label ({small,medium}->cheap, large->large) copy of an existing "
-        "build-student-data output as its own file -- data/student/<dataset>/<output_version>/"
-        "binary/<split>.jsonl -- so label_space=binary training reads a real source-of-truth "
-        "file instead of collapsing labels in memory at tokenization time. Run build-student-data "
-        "first; never modifies the 3-way file it reads from.",
-    )
-    p_build_binary_student_data.add_argument(
-        "--dataset", nargs="+", default=[], metavar="NAME",
-        help="Dataset name(s) to derive, e.g. --dataset gsm8k math",
-    )
-    p_build_binary_student_data.add_argument("--all", action="store_true", help="Derive for every registered dataset.")
-    p_build_binary_student_data.add_argument(
-        "--teacher", required=True, metavar="NAME",
-        help="Teacher backend whose build-student-data output to derive from. See `list-teachers`.",
-    )
-    p_build_binary_student_data.add_argument(
-        "--split", nargs="+", default=["train"], metavar="SPLIT",
-        help="Canonical split(s) to derive (default: train -- the only split train-student-classifier/"
-        "train-student-dual actually read).",
-    )
-    p_build_binary_student_data.set_defaults(func=cmd_build_binary_student_data)
-
     p_train_dual = subparsers.add_parser(
         "train-student-dual",
-        help="Train the dual-head student variant (Experiment 2): a route classifier head + a "
+        help="Train the reasoning-plus-route student: a route classifier head + a "
         "reasoning LM head on one shared trunk, jointly -- reasoning as a training-only auxiliary "
         "signal, never generated at inference. See student/train_dual.py's module docstring.",
     )
@@ -408,40 +373,44 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_train_dual.add_argument(
         "--model-id", default=None, metavar="HF_ID",
-        help="Base model to fine-tune (default: google/gemma-3-270m-it, see student/train_dual.py).",
+        help=f"Base model to fine-tune (default: {STUDENT_MODEL_ID}).",
     )
-    p_train_dual.add_argument("--epochs", type=float, default=3.0, help="Training epochs (default: 3).")
+    p_train_dual.add_argument("--epochs", type=float, default=EPOCHS, help=f"Training epochs (default: {EPOCHS}).")
     p_train_dual.add_argument(
-        "--learning-rate", type=float, default=2e-5, metavar="LR",
-        help="AdamW peak learning rate (default: 2e-5, every prior run in this project's history).",
+        "--learning-rate", type=float, default=LEARNING_RATE, metavar="LR",
+        help=f"AdamW peak learning rate (default: {LEARNING_RATE}).",
     )
     p_train_dual.add_argument(
-        "--warmup-ratio", type=float, default=0.0, metavar="R",
+        "--warmup-ratio", type=float, default=WARMUP_RATIO, metavar="R",
         help="Fraction of total steps to linearly ramp the LR up from 0 to --learning-rate before "
         "--lr-scheduler-type's decay takes over (default: 0.0 = no warmup, Trainer's own default).",
     )
     p_train_dual.add_argument(
-        "--lr-scheduler-type", default="linear", metavar="TYPE",
+        "--lr-scheduler-type", default=LR_SCHEDULER, metavar="TYPE",
         help="HF Trainer schedule name (default: linear -- decays --learning-rate to 0 over the full "
         "run). Common alternatives: cosine, constant, constant_with_warmup. The decay curve is computed "
         "against --epochs * steps-per-epoch, so it's specific to the epoch budget this run uses.",
     )
     p_train_dual.add_argument(
-        "--lambda-route", type=float, default=1.0, metavar="W", help="Weight on the route classifier loss.",
+        "--lambda-route", type=float, default=LAMBDA_ROUTE, metavar="W", help="Weight on the route classifier loss.",
     )
     p_train_dual.add_argument(
-        "--lambda-reason", type=float, default=1.0, metavar="W", help="Weight on the reasoning LM loss.",
+        "--lambda-reason", type=float, default=LAMBDA_REASON, metavar="W", help="Weight on the reasoning LM loss.",
     )
     p_train_dual.add_argument(
-        "--route-head-dropout", type=float, default=0.1, metavar="P",
+        "--route-head-dropout", type=float, default=ROUTE_HEAD_DROPOUT, metavar="P",
         help="Dropout inside the route classifier's MLP (LayerNorm -> Linear -> GELU -> Dropout -> Linear).",
     )
     p_train_dual.add_argument(
-        "--oversample-ratio", type=float, default=0.0, metavar="R",
+        "--oversample-ratio", type=float, default=OVERSAMPLE_RATIO, metavar="R",
         help="Oversample minority routing tiers toward the majority tier's count before training "
-        "(0.0=off/default, 1.0=full balance, 0.5=halfway). See student/data.py's "
+        "(0.0=off, 1.0=full balance, 0.5=halfway). See student/data.py's "
         "oversample_minority_tiers -- duplicated examples carry their routing_reasoning too, so "
         "this affects the reasoning LM loss as well as the route classifier loss.",
+    )
+    p_train_dual.add_argument(
+        "--route-loss", default=ROUTE_LOSS, choices=["soft", "hard", "hard+soft"],
+        help="Routing loss against the teacher's votes (default: %(default)s). See experiment E6.",
     )
     p_train_dual.add_argument(
         "--seed", type=int, default=42, metavar="N",
@@ -452,21 +421,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--checkpoint-dir", default=None, metavar="PATH",
         help="Output dir for the trained checkpoint (default: checkpoints/student-dual/).",
     )
-    p_train_dual.add_argument(
-        "--label-space", default="3way", choices=["3way", "binary"], metavar="SPACE",
-        help="Route classifier's target label space (default: 3way = small/medium/large). "
-        "'binary' collapses to cheap ({small,medium}) vs large -- see common.config."
-        "BINARY_ROUTING_LABELS and student/train_dual.py's train_student_dual() docstring. "
-        "Teacher-labeled data on disk is read as-is either way; only the classifier head's "
-        "target and evaluate-router's/select-router-checkpoint's scoring adapt.",
-    )
     p_train_dual.set_defaults(func=cmd_train_student_dual)
 
     p_train_classifier = subparsers.add_parser(
         "train-student-classifier",
-        help="Train the classifier-only student variant (Experiment 1): route_head -> "
+        help="Train the route-only student: route_head -> "
         "CrossEntropy(route), no reasoning anywhere. The control for whether reasoning "
-        "supervision (train-student-dual, Experiment 2) actually helps routing accuracy. "
+        "supervision (train-student-dual) helps. "
         "See student/train_classifier.py's module docstring.",
     )
     p_train_classifier.add_argument(
@@ -484,33 +445,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_train_classifier.add_argument(
         "--model-id", default=None, metavar="HF_ID",
-        help="Base model to fine-tune (default: google/gemma-3-270m-it, see student/train_classifier.py).",
+        help=f"Base model to fine-tune (default: {STUDENT_MODEL_ID}).",
     )
-    p_train_classifier.add_argument("--epochs", type=float, default=3.0, help="Training epochs (default: 3).")
+    p_train_classifier.add_argument("--epochs", type=float, default=EPOCHS, help=f"Training epochs (default: {EPOCHS}).")
     p_train_classifier.add_argument(
-        "--learning-rate", type=float, default=2e-5, metavar="LR",
-        help="AdamW peak learning rate (default: 2e-5, every prior run in this project's history).",
+        "--learning-rate", type=float, default=LEARNING_RATE, metavar="LR",
+        help=f"AdamW peak learning rate (default: {LEARNING_RATE}).",
     )
     p_train_classifier.add_argument(
-        "--warmup-ratio", type=float, default=0.0, metavar="R",
+        "--warmup-ratio", type=float, default=WARMUP_RATIO, metavar="R",
         help="Fraction of total steps to linearly ramp the LR up from 0 to --learning-rate before "
         "--lr-scheduler-type's decay takes over (default: 0.0 = no warmup, Trainer's own default).",
     )
     p_train_classifier.add_argument(
-        "--lr-scheduler-type", default="linear", metavar="TYPE",
+        "--lr-scheduler-type", default=LR_SCHEDULER, metavar="TYPE",
         help="HF Trainer schedule name (default: linear -- decays --learning-rate to 0 over the full "
         "run). Common alternatives: cosine, constant, constant_with_warmup. The decay curve is computed "
         "against --epochs * steps-per-epoch, so it's specific to the epoch budget this run uses.",
     )
     p_train_classifier.add_argument(
-        "--route-head-dropout", type=float, default=0.1, metavar="P",
+        "--route-head-dropout", type=float, default=ROUTE_HEAD_DROPOUT, metavar="P",
         help="Dropout inside the route classifier's MLP (LayerNorm -> Linear -> GELU -> Dropout -> Linear).",
     )
     p_train_classifier.add_argument(
-        "--oversample-ratio", type=float, default=0.0, metavar="R",
+        "--oversample-ratio", type=float, default=OVERSAMPLE_RATIO, metavar="R",
         help="Oversample minority routing tiers toward the majority tier's count before training "
-        "(0.0=off/default, 1.0=full balance, 0.5=halfway). See student/data.py's "
+        "(0.0=off, 1.0=full balance, 0.5=halfway). See student/data.py's "
         "oversample_minority_tiers.",
+    )
+    p_train_classifier.add_argument(
+        "--route-loss", default=ROUTE_LOSS, choices=["soft", "hard", "hard+soft"],
+        help="Routing loss against the teacher's votes (default: %(default)s). See experiment E6.",
     )
     p_train_classifier.add_argument(
         "--seed", type=int, default=42, metavar="N",
@@ -519,15 +484,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_train_classifier.add_argument(
         "--checkpoint-dir", default=None, metavar="PATH",
         help="Output dir for the trained checkpoint (default: checkpoints/student-classifier/).",
-    )
-    p_train_classifier.add_argument(
-        "--label-space", default="3way", choices=["3way", "binary"], metavar="SPACE",
-        help="Route classifier's target label space (default: 3way = small/medium/large). "
-        "'binary' collapses to cheap ({small,medium}) vs large -- see common.config."
-        "BINARY_ROUTING_LABELS and student/train_classifier.py's train_student_classifier() "
-        "docstring. Teacher-labeled data on disk is read as-is either way; only the "
-        "classifier head's target and evaluate-router's/select-router-checkpoint's scoring "
-        "adapt.",
     )
     p_train_classifier.set_defaults(func=cmd_train_student_classifier)
 

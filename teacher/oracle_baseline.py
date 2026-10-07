@@ -24,15 +24,14 @@ unmodified: `predict()` here is a cache lookup of a pre-computed oracle
 label, not a real model call (latency/cost are reported as 0 accordingly --
 never plotted as a real router's serving cost).
 
-Requires oracle labels to already exist for whatever split is being
-labeled (data/oracle/<dataset>/<split>.labels.jsonl) -- run
-`oracle/labeler.py`'s label_dataset() first if they don't. Train/
-calibration/test already exist as of this writing; validation does not
-(see the caller-facing note in run.py / EXPERIMENTS.md) -- either compute
-it the same way, or use a held-out slice of the train split for checkpoint
-selection instead.
+Requires oracle labels for the split being labeled
+(data/oracle/<dataset>/<split>.labels.jsonl): run `run.py oracle-label` first.
+Reference baseline only (DESIGN.md §9, group 5): it uses true labels, which
+DistillRouter itself never sees.
 """
 from __future__ import annotations
+
+from typing import Optional
 
 from common.config import ORACLE_DIR
 from common.schema import Example, OracleLabel, TeacherLabel, read_jsonl
@@ -47,9 +46,9 @@ class OracleDirectTeacher(TeacherModel):
     fewshot_source_split = ""  # no few-shot demos -- this isn't a prompted model
 
     def __init__(self) -> None:
-        self._cache: dict[str, dict[str, str]] = {}  # dataset -> {query_id: routing_label}
+        self._cache: dict[str, dict[str, Optional[str]]] = {}  # dataset -> {query_id: routing_label}
 
-    def _labels_for(self, dataset: str, split: str) -> dict[str, str]:
+    def _labels_for(self, dataset: str, split: str) -> dict[str, Optional[str]]:
         key = f"{dataset}/{split}"
         if key not in self._cache:
             path = ORACLE_DIR / dataset / f"{split}.labels.jsonl"
@@ -62,9 +61,13 @@ class OracleDirectTeacher(TeacherModel):
             self._cache[key] = {label.query_id: label.routing_label for label in labels}
         return self._cache[key]
 
-    def predict(self, example: Example) -> TeacherLabel:
+    def predict(self, example: Example) -> Optional[TeacherLabel]:
+        """None for unsolvable questions: no routing decision is correct, so
+        the oracle-supervised baseline trains on solvable questions only."""
         labels = self._labels_for(example.dataset, example.split)
         routing_label = labels[example.id]  # KeyError is a real bug here, not swallowed
+        if routing_label is None:
+            return None
         return TeacherLabel(
             query_id=example.id,
             dataset=example.dataset,

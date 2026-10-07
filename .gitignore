@@ -16,8 +16,6 @@ data/oracle/*
 !data/oracle/.gitkeep
 data/student/*
 !data/student/.gitkeep
-data/unused/*
-!data/unused/.gitkeep
 
 # checkpoints/: single-seed exploratory scratch, fully superseded by the
 # multi-seed runs*/ protocol below — nothing here is ever worth tracking.
@@ -45,3 +43,4 @@ research_lambda_sweep/
 
 # Manual duplicate-copy archive, superseded by the above.
 results_archive/
+data/unused/

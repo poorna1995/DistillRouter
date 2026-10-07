@@ -1,6 +1,5 @@
-"""Dataset loader registry. Add a dataset by writing a module with a
-BaseDatasetLoader subclass decorated with @register, then import it below.
-"""
-from dataset.base import datasets, get_loader_class  # noqa: F401
+"""Dataset loaders. Add one by writing a BaseDatasetLoader subclass decorated
+with @register, then importing its module below."""
+from dataset.base import datasets, get_loader_class, training_datasets 
 
-from dataset import gsm8k, math
+from dataset import gsm8k, gsm_symbolic, math

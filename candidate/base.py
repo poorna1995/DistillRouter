@@ -1,11 +1,11 @@
-"""Candidate answering models — the models oracle labeling executes to
-measure real capability per tier."""
+"""Candidate answering models (small and large) — the models oracle labeling
+executes to measure whether each one answers a question correctly."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from common.config import DEFAULT_CANDIDATE_ROSTER
+from common.config import CANDIDATE_MODELS, MAX_NEW_TOKENS
 from common.hf_generation import generate_chat_response, load_causal_lm
 
 
@@ -18,7 +18,7 @@ class CandidateResponse:
 
 
 class CandidateModel(ABC):
-    tier: str             # one of common.config.ROUTING_LABELS
+    tier: str             # one of common.config.LABELS
     model_id: str
     prompt_version: str   # part of CandidateAttempt's cache key — bump when the instruction text changes
 
@@ -34,8 +34,8 @@ class HuggingFaceCandidate(CandidateModel):
         "For example, if the final answer is 42, the last line must be "
         "exactly: \\boxed{42}\n"
     )
-    PROMPT_VERSION = "boxed-internal-cot-v3"  
-    MAX_NEW_TOKENS = 1024
+    PROMPT_VERSION = "boxed-internal-cot-v3"
+    MAX_NEW_TOKENS = MAX_NEW_TOKENS
 
     def __init__(self, tier: str, model_id: str) -> None:
         self.tier = tier
@@ -55,8 +55,8 @@ class HuggingFaceCandidate(CandidateModel):
 
 
 def get_candidate(tier: str) -> CandidateModel:
-    """Instantiate (loads weights to GPU) the current roster's candidate for `tier`."""
-    if tier not in DEFAULT_CANDIDATE_ROSTER:
-        available = ", ".join(DEFAULT_CANDIDATE_ROSTER)
+    """Instantiate (loads weights to GPU) the candidate model for `tier`."""
+    if tier not in CANDIDATE_MODELS:
+        available = ", ".join(CANDIDATE_MODELS)
         raise KeyError(f"Unknown tier '{tier}'. Available: {available}")
-    return HuggingFaceCandidate(tier, DEFAULT_CANDIDATE_ROSTER[tier])
+    return HuggingFaceCandidate(tier, CANDIDATE_MODELS[tier])

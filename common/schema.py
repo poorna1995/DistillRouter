@@ -9,37 +9,36 @@ from typing import Any, Optional, Type, TypeVar
 
 @dataclass
 class Example:
-    """One dataset query, normalized across all datasets."""
+    """One question, in the same format for every dataset."""
 
-    id: str                              # "<dataset>-<split>-<index>"
+    id: str                              # e.g. "gsm8k-train-12", "math500-3"
     dataset: str
-    domain: str
-    split: str                           # "train" | "validation" | "test" | "calibration"
+    split: str                           # "train" | "validation" | "calibration" | "test"
     query: str
     reference_answer: str
-    solution: Optional[str] = None
-    difficulty: Optional[str] = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    difficulty: Optional[str] = None     # MATH level "1".."5"; used for stratified sampling
+    metadata: dict[str, Any] = field(default_factory=dict)  # e.g. {"subject": ...}; used for stratified sampling
 
 
 @dataclass
 class TeacherLabel:
     """A teacher's routing prediction for one Example. `teacher_route` is
-    the teacher's guess, not verified ground truth (see OracleLabel). No
-    probabilities field — no teacher prompt here asks for a real
-    predictive distribution.
+    the teacher's guess (majority vote), not verified ground truth (see
+    OracleLabel). `soft_large` is the share of the teacher's votes for
+    "large"; None when the teacher voted once.
     """
 
     query_id: str
     dataset: str
     teacher_name: str
     prompt_version: str
-    teacher_route: str                   # one of common.config.ROUTING_LABELS
+    teacher_route: str                   # one of common.config.LABELS
     latency_seconds: float
     input_tokens: int
     output_tokens: int
     inference_cost: float
     routing_reasoning: str = ""          # one coherent sentence, not itemized — see teacher/fewshot.py
+    soft_large: Optional[float] = None   # share of votes for "large", e.g. 3 of 5 -> 0.6
 
 
 @dataclass
@@ -50,7 +49,7 @@ class CandidateAttempt:
 
     query_id: str
     dataset: str
-    tier: str                            # one of common.config.ROUTING_LABELS
+    tier: str                            # one of common.config.LABELS
     model_id: str
     prompt_version: str
     answer_text: str
@@ -62,17 +61,17 @@ class CandidateAttempt:
 
 @dataclass
 class OracleLabel:
-    """Ground-truth routing label: the cheapest tier that answered
-    correctly, or "large" if none did. oracle/labeler.py runs every tier
-    on every query (no early-exit), so *_correct is always fully known,
-    not just the winning tier's."""
+    """Ground-truth routing label: "small" if the small model answers
+    correctly, else "large" if the large model does, else None (unsolvable:
+    no routing decision is correct, so it is left out of routing accuracy).
+    oracle/labeler.py runs both models on every query, so *_correct is
+    always fully known."""
 
     query_id: str
     dataset: str
-    routing_label: str
-    succeeded: bool
+    routing_label: Optional[str]         # None = unsolvable
+    succeeded: bool                      # False = unsolvable
     small_correct: bool
-    medium_correct: bool
     large_correct: bool
 
 

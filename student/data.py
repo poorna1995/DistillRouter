@@ -1,5 +1,5 @@
 """Assembles the distillation dataset from teacher output: one record
-per labeled example, {query, teacher_route, routing_reasoning}. No
+per labeled example, {query, teacher_route, soft_large, routing_reasoning}. No
 answers/solutions/oracle labels — the teacher's own output is the entire
 supervision signal, matching what the student sees at inference (query
 text only). Read directly by both student variants (student/
@@ -12,7 +12,7 @@ from __future__ import annotations
 import collections
 from dataclasses import dataclass
 
-from common.config import BINARY_ROUTING_LABELS, PROCESSED_DIR, STUDENT_DIR, TEACHER_DIR, map_route
+from common.config import PROCESSED_DIR, STUDENT_DIR, TEACHER_DIR
 from common.schema import Example, TeacherLabel, read_jsonl, write_jsonl
 
 
@@ -22,6 +22,7 @@ class DistillationExample:
 
     query: str
     teacher_route: str
+    soft_large: float          # share of teacher votes for "large" (0.0 or 1.0 for a single vote)
     routing_reasoning: str
 
 
@@ -59,6 +60,8 @@ def build_distillation_dataset(
             DistillationExample(
                 query=example.query,
                 teacher_route=label.teacher_route,
+                soft_large=(label.soft_large if label.soft_large is not None
+                            else float(label.teacher_route == "large")),
                 routing_reasoning=label.routing_reasoning,
             )
         )
@@ -72,49 +75,6 @@ def build_distillation_dataset(
     print(
         f"[{dataset_name}/{split}] {len(records)} distillation records -> {output_path} "
         f"(skipped {skipped_version} other prompt_version, {skipped_missing} missing example)"
-    )
-    return records
-
-
-def build_binary_distillation_dataset(
-    dataset_name: str, output_version: str = "", split: str = "train"
-) -> list[DistillationExample]:
-    """Derives a binary-label copy of build_distillation_dataset()'s output
-    as its own file on disk -- a real source of truth for the binary label
-    space, not just an in-memory map_route() applied at tokenization time.
-    Reads data/student/<dataset>/[<output_version>/]<split>.jsonl (the
-    3-way file -- must already exist, run build-student-data first) and
-    writes data/student/<dataset>/[<output_version>/]binary/<split>.jsonl,
-    with teacher_route collapsed via common.config.map_route() into
-    BINARY_ROUTING_LABELS ({small,medium}->cheap, large->large).
-    routing_reasoning is carried through unchanged -- dual-head training
-    still reads it for the reasoning LM loss regardless of label space.
-
-    Never modifies the 3-way file it reads from; train_student_classifier/
-    train_student_dual read this binary file when label_space="binary"
-    instead of collapsing on the fly, so the two label spaces' training
-    data are two separate, inspectable, diffable files on disk."""
-    input_dir = STUDENT_DIR / dataset_name
-    if output_version:
-        input_dir = input_dir / output_version
-    input_path = input_dir / f"{split}.jsonl"
-    examples = read_jsonl(input_path, DistillationExample)
-
-    records = [
-        DistillationExample(
-            query=ex.query,
-            teacher_route=map_route(ex.teacher_route, BINARY_ROUTING_LABELS),
-            routing_reasoning=ex.routing_reasoning,
-        )
-        for ex in examples
-    ]
-
-    output_path = input_dir / "binary" / f"{split}.jsonl"
-    write_jsonl(output_path, records)
-
-    print(
-        f"[{dataset_name}/{split}] {len(records)} binary-label distillation records "
-        f"(derived from {input_path}) -> {output_path}"
     )
     return records
 

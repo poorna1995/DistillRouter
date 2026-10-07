@@ -1,0 +1,132 @@
+\begin{thebibliography}{16}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Ba et~al.(2016)Ba, Kiros, and Hinton]{ba2016layer}
+Jimmy~Lei Ba, Jamie~Ryan Kiros, and Geoffrey~E. Hinton.
+\newblock Layer normalization.
+\newblock \emph{arXiv preprint arXiv:1607.06450}, 2016.
+\newblock URL \url{https://arxiv.org/abs/1607.06450}.
+
+\bibitem[Cobbe et~al.(2021)Cobbe, Kosaraju, Bavarian, Chen, Jun, Kaiser,
+  Plappert, Tworek, Hilton, Nakano, Hesse, and Schulman]{cobbe2021training}
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz
+  Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano,
+  Christopher Hesse, and John Schulman.
+\newblock Training verifiers to solve math word problems.
+\newblock \emph{arXiv preprint arXiv:2110.14168}, 2021.
+\newblock URL \url{https://arxiv.org/abs/2110.14168}.
+
+\bibitem[{Gemma Team}(2025)]{gemmateam2025gemma3}
+{Gemma Team}.
+\newblock Gemma 3 technical report.
+\newblock \emph{arXiv preprint arXiv:2503.19786}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2503.19786}.
+
+\bibitem[Hendrycks and Gimpel(2016)]{hendrycks2016gelu}
+Dan Hendrycks and Kevin Gimpel.
+\newblock Gaussian error linear units (gelus).
+\newblock \emph{arXiv preprint arXiv:1606.08415}, 2016.
+\newblock URL \url{https://arxiv.org/abs/1606.08415}.
+
+\bibitem[Hendrycks et~al.(2021)Hendrycks, Burns, Kadavath, Arora, Basart, Tang,
+  Song, and Steinhardt]{hendrycks2021measuring}
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric
+  Tang, Dawn Song, and Jacob Steinhardt.
+\newblock Measuring mathematical problem solving with the math dataset.
+\newblock In \emph{Proceedings of the Neural Information Processing Systems
+  Track on Datasets and Benchmarks (NeurIPS)}, 2021.
+\newblock URL \url{https://arxiv.org/abs/2103.03874}.
+
+\bibitem[Hinton et~al.(2015)Hinton, Vinyals, and Dean]{hinton2015distilling}
+Geoffrey Hinton, Oriol Vinyals, and Jeff Dean.
+\newblock Distilling the knowledge in a neural network.
+\newblock \emph{arXiv preprint arXiv:1503.02531}, 2015.
+\newblock URL \url{https://arxiv.org/abs/1503.02531}.
+
+\bibitem[Hsieh et~al.(2023)Hsieh, Li, Yeh, Nakhost, Fujii, Ratner, Krishna,
+  Lee, and Pfister]{hsieh2023distilling}
+Cheng-Yu Hsieh, Chun-Liang Li, Chih-Kuan Yeh, Hootan Nakhost, Yasuhisa Fujii,
+  Alexander Ratner, Ranjay Krishna, Chen-Yu Lee, and Tomas Pfister.
+\newblock Distilling step-by-step! outperforming larger language models with
+  less training data and smaller model sizes.
+\newblock In \emph{Findings of the Association for Computational Linguistics:
+  ACL 2023}, 2023.
+\newblock URL \url{https://aclanthology.org/2023.findings-acl.507/}.
+
+\bibitem[Koehn(2004)]{koehn2004statistical}
+Philipp Koehn.
+\newblock Statistical significance tests for machine translation evaluation.
+\newblock In \emph{Proceedings of the 2004 Conference on Empirical Methods in
+  Natural Language Processing (EMNLP)}, pages 388--395, 2004.
+\newblock URL \url{https://aclanthology.org/W04-3250/}.
+
+\bibitem[Loshchilov and Hutter(2019)]{loshchilov2019decoupled}
+Ilya Loshchilov and Frank Hutter.
+\newblock Decoupled weight decay regularization.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2019.
+\newblock URL \url{https://arxiv.org/abs/1711.05101}.
+
+\bibitem[Lu et~al.(2024)Lu, Yuan, Lin, Lin, Yuan, Zhou, and Zhou]{lu2024zooter}
+Keming Lu, Hongyi Yuan, Runji Lin, Junyang Lin, Zheng Yuan, Chang Zhou, and
+  Jingren Zhou.
+\newblock Routing to the expert: Efficient reward-guided ensemble of large
+  language models.
+\newblock In \emph{Proceedings of the 2024 Conference of the North American
+  Chapter of the Association for Computational Linguistics: Human Language
+  Technologies (Volume 1: Long Papers)}, 2024.
+\newblock URL \url{https://aclanthology.org/2024.naacl-long.109/}.
+
+\bibitem[Ong et~al.(2024)Ong, Almahairi, Wu, Chiang, Wu, Gonzalez, Kadous, and
+  Stoica]{ong2024routellm}
+Isaac Ong, Amjad Almahairi, Vincent Wu, Wei-Lin Chiang, Tianhao Wu, Joseph~E.
+  Gonzalez, M.~Waleed Kadous, and Ion Stoica.
+\newblock Routellm: Learning to route llms with preference data.
+\newblock \emph{arXiv preprint arXiv:2406.18665}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2406.18665}.
+
+\bibitem[{Qwen Team}(2024)]{qwenteam2024qwen25}
+{Qwen Team}.
+\newblock Qwen2.5 technical report.
+\newblock \emph{arXiv preprint arXiv:2412.15115}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2412.15115}.
+
+\bibitem[Srivastava et~al.(2014)Srivastava, Hinton, Krizhevsky, Sutskever, and
+  Salakhutdinov]{srivastava2014dropout}
+Nitish Srivastava, Geoffrey Hinton, Alex Krizhevsky, Ilya Sutskever, and Ruslan
+  Salakhutdinov.
+\newblock Dropout: A simple way to prevent neural networks from overfitting.
+\newblock \emph{Journal of Machine Learning Research}, 15\penalty0
+  (56):\penalty0 1929--1958, 2014.
+\newblock URL \url{https://www.jmlr.org/papers/v15/srivastava14a.html}.
+
+\bibitem[Suganthan et~al.(2025)Suganthan, Moiseev, Yan, Wu, Ni, Han, Zitouni,
+  Alfonseca, Wang, and Dong]{suganthan2025adapting}
+Paul Suganthan, Fedor Moiseev, Le~Yan, Junru Wu, Jianmo Ni, Jay Han, Imed
+  Zitouni, Enrique Alfonseca, Xuanhui Wang, and Zhe Dong.
+\newblock Adapting decoder-based language models for diverse encoder downstream
+  tasks.
+\newblock \emph{arXiv preprint arXiv:2503.02656}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2503.02656}.
+
+\bibitem[Xu et~al.(2025)Xu, Zhou, Shukla, Yang, Ruan, Lin, Zou, Liu, and
+  Lakshmanan]{xu2025dualhead}
+Jillian Xu, Dylan Zhou, Vinay Shukla, Yang Yang, Junrui Ruan, Shuhuai Lin,
+  Wenfei Zou, Yinxiao Liu, and Karthik Lakshmanan.
+\newblock Dual-head reasoning distillation: Improving classifier accuracy with
+  train-time-only reasoning.
+\newblock In \emph{NeurIPS 2025 Efficient Reasoning Workshop}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2509.21487}.
+
+\bibitem[Zhang et~al.(2025)Zhang, Feng, and You]{zhang2025routerr1}
+Haozhen Zhang, Tao Feng, and Jiaxuan You.
+\newblock Router-r1: Teaching llms multi-round routing and aggregation via
+  reinforcement learning.
+\newblock \emph{arXiv preprint arXiv:2506.09033}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2506.09033}.
+
+\end{thebibliography}

@@ -1,7 +1,6 @@
 """Evaluates a trained router checkpoint that predicts via a single
-forward pass -- student/train_classifier.py's ClassifierRouter (Experiment
-1: route-only) or student/train_dual.py's DualHeadRouter (Experiment 2:
-route + reasoning, dual-head), both of which expose the same
+forward pass -- the route-only ClassifierRouter (student/train_classifier.py)
+or the reasoning-plus-route DualHeadRouter (student/train_dual.py), both of which expose the same
 load_*_checkpoint(dir) -> (model, tokenizer) and predict_route(model,
 tokenizer, query) -> {route, probabilities, latency_seconds} contract.
 
@@ -14,9 +13,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
-from common.config import PROCESSED_DIR, TEACHER_DIR, map_route
+from common.config import PROCESSED_DIR, TEACHER_DIR
 from common.schema import Example, TeacherLabel, read_jsonl
 from evaluation.metrics import classification_metrics, collect_true_pred_vs_teacher, latency_comparison
 
@@ -35,7 +34,7 @@ def generate_router_predictions(
     `split` should be one the checkpoint wasn't trained on (validation/
     test), not train, or accuracy measures memorization. Returns
     (predictions, routing_labels) -- routing_labels is the checkpoint's
-    own model.routing_labels (3-way or binary), read off the loaded model
+    own model.routing_labels (small/large), read off the loaded model
     so callers can score/collapse-compare against it without having to
     know in advance which label space this checkpoint was trained on."""
     model, tokenizer = load_fn(checkpoint_dir)
@@ -60,19 +59,12 @@ def save_router_predictions(
     teacher_output_version: str,
     split: str,
     output_path: str,
-    target_labels: Optional[tuple[str, ...]] = None,
 ) -> int:
     """One row per example -- query_id, teacher_route, predicted_route,
     correct, the full probability distribution (whichever label space the
     checkpoint predicts in), and latency -- the artifact for error
     analysis and qualitative inspection, since the aggregate metrics alone
-    can't answer "which queries did this checkpoint get wrong."
-
-    target_labels: same meaning as evaluation/metrics.py's
-    collect_true_pred_vs_teacher -- when given, teacher_route is collapsed
-    into this label space before the "correct" comparison and before being
-    written to the row, so it matches predicted_route's label space (e.g.
-    binary "cheap"/"large" rather than the raw cached 3-way tier)."""
+    can't answer "which queries did this checkpoint get wrong."""
     teacher_path = TEACHER_DIR / dataset_name / teacher_output_version / f"{split}.jsonl"
     teacher_labels = {label.query_id: label for label in read_jsonl(teacher_path, TeacherLabel)}
 
@@ -82,8 +74,6 @@ def save_router_predictions(
         if teacher_label is None:
             continue
         teacher_route = teacher_label.teacher_route
-        if target_labels is not None:
-            teacher_route = map_route(teacher_route, target_labels)
         rows.append({
             "query_id": pred["query_id"],
             "teacher_route": teacher_route,
@@ -114,16 +104,10 @@ def evaluate_router_checkpoint(
     teacher_route, i.e. distillation fidelity, not oracle correctness
     (see evaluation/oracle_check.py for that) -- plus latency vs the
     teacher's own latency if available. Saves classification_report.json
-    + predictions.jsonl under checkpoint_dir.
-
-    Scores in whichever label space the checkpoint itself predicts in
-    (routing_labels, read off the loaded model by generate_router_
-    predictions) -- 3-way or binary -- collapsing the teacher's always
-    3-way cached label to match, so this works unchanged for either kind
-    of checkpoint."""
+    + predictions.jsonl under checkpoint_dir."""
     predictions, routing_labels = generate_router_predictions(load_fn, predict_fn, checkpoint_dir, dataset_name, split)
     y_true, y_pred = collect_true_pred_vs_teacher(
-        predictions, dataset_name, teacher_output_version, split, target_labels=routing_labels
+        predictions, dataset_name, teacher_output_version, split
     )
     report = classification_metrics(y_true, y_pred, labels=list(routing_labels))
 
@@ -137,7 +121,6 @@ def evaluate_router_checkpoint(
     (eval_dir / "classification_report.json").write_text(json.dumps(report, indent=2))
     n_saved = save_router_predictions(
         predictions, dataset_name, teacher_output_version, split, str(eval_dir / "predictions.jsonl"),
-        target_labels=routing_labels,
     )
     print(f"[{dataset_name}/{split}] Saved classification_report.json + predictions.jsonl ({n_saved} rows) -> {eval_dir}")
     return report
@@ -154,8 +137,7 @@ def select_best_router_checkpoint(
     """Evaluates every checkpoint-<step> saved under checkpoint_root (one
     per epoch, from student/route_head.py's SaveEpochCheckpointCallback)
     against `split`, pooled across dataset_names, and picks the one with
-    the highest macro F1 -- the same selection rule for both Experiment 1
-    (classifier) and Experiment 2 (dual-head) checkpoints. Doesn't
+    the highest macro F1 -- the same selection rule for both student variants. Doesn't
     freeze/copy anything -- see evaluation/metrics.py's
     freeze_checkpoint() for that."""
     all_dirs = [p for p in Path(checkpoint_root).glob("checkpoint-*") if p.is_dir()]
@@ -176,14 +158,13 @@ def select_best_router_checkpoint(
         for name in dataset_names:
             predictions, routing_labels = generate_router_predictions(load_fn, predict_fn, str(ckpt), name, split)
             y_true, y_pred = collect_true_pred_vs_teacher(
-                predictions, name, teacher_output_version, split, target_labels=routing_labels
+                predictions, name, teacher_output_version, split
             )
             y_true_all.extend(y_true); y_pred_all.extend(y_pred)
 
             eval_dir = ckpt / f"eval_{name}_{split}"
             save_router_predictions(
                 predictions, name, teacher_output_version, split, str(eval_dir / "predictions.jsonl"),
-                target_labels=routing_labels,
             )
 
         report = classification_metrics(y_true_all, y_pred_all, labels=list(routing_labels) or None)

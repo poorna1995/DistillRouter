@@ -1,52 +1,76 @@
-"""Per-dataset correctness scoring: candidate answer text -> right/wrong."""
+"""Answer checking: is a model's answer to a maths question correct?
+
+Two steps, the same for every dataset:
+1. Extract the model's FINAL answer: the last \\boxed{...}, else an {"answer": ...}
+   JSON object, else the last bold span or number in the text.
+2. Compare it with the reference using math-verify, which checks mathematical
+   equivalence ("1/2" == "0.5" == "\\frac{1}{2}") instead of exact text.
+
+On the submitted test answers this never marked an old-correct answer wrong
+and recovered 46 correct answers the old string match missed (DESIGN.md §6.1).
+"""
 from __future__ import annotations
 
 import json
 import re
-from typing import Callable, Dict, Optional
+from typing import Optional
 
-_REGISTRY: Dict[str, Callable[[str, str], bool]] = {}
+from math_verify import parse, verify
 
-
-def register_scorer(dataset_name: str) -> Callable:
-    """Decorator: registers a scorer function under a dataset name."""
-
-    def decorator(fn: Callable[[str, str], bool]) -> Callable[[str, str], bool]:
-        _REGISTRY[dataset_name] = fn
-        return fn
-
-    return decorator
+_JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")              # flat (non-nested) object
+_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")                # markdown **bold** span
+_NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?(?:/\d+)?")      # 42, 1,234, 3.5, 1/2
+_THOUSANDS_RE = re.compile(r"-?\d{1,3}(,\d{3})+(\.\d+)?")  # 1,234 or 12,345.6
 
 
-def score(dataset_name: str, candidate_answer_text: str, reference_answer: str) -> bool:
-    """True if candidate_answer_text matches reference_answer under dataset_name's scorer."""
-    if dataset_name not in _REGISTRY:
-        available = ", ".join(sorted(_REGISTRY)) or "(none registered)"
-        raise KeyError(f"No scorer registered for '{dataset_name}'. Available: {available}")
-    return _REGISTRY[dataset_name](candidate_answer_text, reference_answer)
+def is_correct(answer_text: str, reference_answer: str) -> bool:
+    """True if the final answer in `answer_text` equals `reference_answer`."""
+    extracted = extract_final_answer(answer_text)
+    if extracted is None:
+        return False
+    gold = parse(f"${_clean(reference_answer)}$")
+    pred = parse(f"${_clean(extracted)}$")
+    return bool(verify(gold, pred))
 
 
-_JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")  # flat (non-nested) object
-_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")     # markdown **bold** span
-_NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
+def _clean(answer: str) -> str:
+    """Drop dollar signs; drop commas only from thousands separators, so
+    tuples and intervals such as (-3,2) keep theirs."""
+    answer = answer.strip().replace("\\$", "").replace("$", "")
+    return answer.replace(",", "") if _THOUSANDS_RE.fullmatch(answer) else answer
 
 
-def extract_candidate_answer(text: str) -> Optional[str]:
-    """Extract a model's final answer: \\boxed{...}, else {"answer": ...}
-    JSON, else the last bold span or number in the text."""
-    for extractor in (extract_boxed_answer, extract_json_answer, _extract_fallback_answer):
+def extract_final_answer(text: str) -> Optional[str]:
+    for extractor in (extract_boxed_answer, _extract_json_answer, _extract_last_bold_or_number):
         result = extractor(text)
         if result is not None:
             return result
     return None
 
 
-def extract_json_answer(text: str) -> Optional[str]:
-    """Return the "answer" field of the last valid {"answer": ...} object in text."""
-    matches = _JSON_OBJECT_RE.findall(text)
-    for candidate_text in reversed(matches):
+def extract_boxed_answer(text: str) -> Optional[str]:
+    """Content of the last \\boxed{...} (brace-matched, handles nesting)."""
+    start = text.rfind("\\boxed")
+    if start == -1:
+        return None
+    i = text.find("{", start)
+    if i == -1:
+        return None
+    depth = 0
+    for j in range(i, len(text)):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[i + 1 : j]
+    return None  # unbalanced braces
+
+
+def _extract_json_answer(text: str) -> Optional[str]:
+    for candidate in reversed(_JSON_OBJECT_RE.findall(text)):
         try:
-            parsed = json.loads(candidate_text)
+            parsed = json.loads(candidate)
         except json.JSONDecodeError:
             continue
         if isinstance(parsed, dict) and "answer" in parsed:
@@ -54,33 +78,9 @@ def extract_json_answer(text: str) -> Optional[str]:
     return None
 
 
-def extract_boxed_answer(text: str) -> Optional[str]:
-    """Return the content of the final \\boxed{...} in text (brace-matched, handles nesting)."""
-    key = "\\boxed"
-    start = text.rfind(key)
-    if start == -1:
-        return None
-    i = start + len(key)
-    while i < len(text) and text[i] != "{":
-        i += 1
-    if i >= len(text):
-        return None
-    depth = 0
-    content_start = i
-    for j in range(i, len(text)):
-        if text[j] == "{":
-            depth += 1
-        elif text[j] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[content_start + 1 : j]
-    return None  # unbalanced braces
-
-
-def _extract_fallback_answer(text: str) -> Optional[str]:
-    """Last resort: the last bold markdown span, else the last number in the text."""
-    bold_matches = _BOLD_RE.findall(text)
-    if bold_matches:
-        return bold_matches[-1].strip()
-    number_matches = _NUMBER_RE.findall(text)
-    return number_matches[-1] if number_matches else None
+def _extract_last_bold_or_number(text: str) -> Optional[str]:
+    bold = _BOLD_RE.findall(text)
+    if bold:
+        return bold[-1].strip()
+    numbers = _NUMBER_RE.findall(text)
+    return numbers[-1] if numbers else None

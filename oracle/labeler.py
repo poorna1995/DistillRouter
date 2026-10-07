@@ -1,17 +1,14 @@
-"""Runs every candidate tier on every query (no early-exit) and assigns
-the cheapest correct tier as the oracle label. Ground truth — never uses
-the teacher. Always exhaustive so small_correct/medium_correct/large_correct
-are complete for every query, not just the winning tier.
+"""Runs both candidate models on every query (no early-exit) and assigns the
+oracle label: "small" if the small model is correct, else "large" if the large
+model is, else None (unsolvable). Ground truth — never uses the teacher.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-import dataset  # noqa: F401 — populates common.scoring's scorer registry
-
-from common.config import DEFAULT_CANDIDATE_ROSTER, ORACLE_DIR, PROCESSED_DIR, ROUTING_LABELS
+from common.config import CANDIDATE_MODELS, LABELS, ORACLE_DIR, PROCESSED_DIR
 from common.schema import CandidateAttempt, OracleLabel, read_jsonl, write_jsonl
-from common.scoring import score
+from common.scoring import is_correct
 from candidate.base import CandidateModel, HuggingFaceCandidate, get_candidate
 from oracle.cache import CandidateAttemptCache
 
@@ -30,6 +27,9 @@ def label_dataset(dataset_name: str, split: str = "calibration", limit: Optional
     cache below was never affected, only this aggregated output file.)
     """
     processed_path = PROCESSED_DIR / dataset_name / f"{split}.jsonl"
+    if not processed_path.exists():
+        print(f"[{dataset_name}/{split}] no such split, skipping")
+        return {}
     examples = read_jsonl(processed_path)
     if limit is not None:
         examples = examples[:limit]
@@ -46,16 +46,16 @@ def label_dataset(dataset_name: str, split: str = "calibration", limit: Optional
     stats = {
         "cache_hits": 0,
         "new_attempts": 0,
-        "labels_by_tier": {tier: 0 for tier in ROUTING_LABELS},
-        "no_tier_succeeded": 0,
+        "labels_by_tier": {tier: 0 for tier in LABELS},
+        "unsolvable": 0,
     }
     total = len(examples)
 
     for i, example in enumerate(examples, 1):
         tier_correct: dict[str, bool] = {}
 
-        for tier in ROUTING_LABELS:
-            model_id = DEFAULT_CANDIDATE_ROSTER[tier]
+        for tier in LABELS:
+            model_id = CANDIDATE_MODELS[tier]
             cached_attempt = attempt_cache.get(example.id, tier, model_id, _CANDIDATE_PROMPT_VERSION)
             if cached_attempt is not None:
                 stats["cache_hits"] += 1
@@ -71,7 +71,7 @@ def label_dataset(dataset_name: str, split: str = "calibration", limit: Optional
                     model_id=model_id,
                     prompt_version=_CANDIDATE_PROMPT_VERSION,
                     answer_text=response.answer_text,
-                    correct=score(dataset_name, response.answer_text, example.reference_answer),
+                    correct=is_correct(response.answer_text, example.reference_answer),
                     latency_seconds=response.latency_seconds,
                     input_tokens=response.input_tokens,
                     output_tokens=response.output_tokens,
@@ -81,23 +81,23 @@ def label_dataset(dataset_name: str, split: str = "calibration", limit: Optional
 
             tier_correct[tier] = attempt.correct
 
-        assigned_label = next((tier for tier in ROUTING_LABELS if tier_correct[tier]), None)
+        # Cheapest correct model; None when neither is correct (unsolvable).
+        assigned_label = next((tier for tier in LABELS if tier_correct[tier]), None)
         succeeded = assigned_label is not None
-        if not succeeded:
-            assigned_label = "large"  # best tried option, even though it failed
-            stats["no_tier_succeeded"] += 1
+        if succeeded:
+            stats["labels_by_tier"][assigned_label] += 1
+        else:
+            stats["unsolvable"] += 1
 
-        stats["labels_by_tier"][assigned_label] += 1
         labels_by_id[example.id] = OracleLabel(
             query_id=example.id,
             dataset=dataset_name,
             routing_label=assigned_label,
             succeeded=succeeded,
             small_correct=tier_correct["small"],
-            medium_correct=tier_correct["medium"],
             large_correct=tier_correct["large"],
         )
-        outcome = assigned_label if succeeded else f"{assigned_label} (no tier succeeded)"
+        outcome = assigned_label if succeeded else "unsolvable"
         print(
             f"[{dataset_name}/{split}] {i}/{total} {example.id} -> {outcome}, correct={tier_correct}",
             flush=True,
@@ -108,6 +108,6 @@ def label_dataset(dataset_name: str, split: str = "calibration", limit: Optional
         f"[{dataset_name}/{split}] done: {len(labels_by_id)} labels on disk "
         f"({n_existing} pre-existing + {total} processed this call, {len(labels_by_id) - n_existing} new) "
         f"-> {output_path} (cache hits={stats['cache_hits']}, new attempts={stats['new_attempts']}, "
-        f"by tier={stats['labels_by_tier']}, no tier succeeded={stats['no_tier_succeeded']})"
+        f"by label={stats['labels_by_tier']}, unsolvable={stats['unsolvable']})"
     )
     return stats

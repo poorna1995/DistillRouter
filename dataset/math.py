@@ -1,96 +1,70 @@
-"""MATH loader — competition mathematics problems (Hendrycks et al., 2021).
-Source: huggingface.co/datasets/EleutherAI/hendrycks_math (7 subject
-configs, reproduces the 7,500 train / 5,000 test split). No validation
-split, carved from train by base.py.
+"""MATH: competition mathematics (Hendrycks et al., 2021).
 
-Note: this module's name shadows stdlib `math` by leaf name. Safe as-is
-since only the project root is on sys.path, not dataset/ itself — don't
-add dataset/ to sys.path without re-checking that.
+Train: Hugging Face `EleutherAI/hendrycks_math` (7 subjects, 7,500 problems);
+       the reference answer is the last \\boxed{} in the solution.
+Test:  MATH-500 (`HuggingFaceH4/MATH-500`), a fixed set of 500 MATH test problems.
+Any training problem that also appears in MATH-500 is removed (leakage check).
+
+Note: this module's name shadows the stdlib `math` by leaf name; safe because
+only the project root is on sys.path.
 """
 from __future__ import annotations
 
-import json
-
 from datasets import load_dataset
 
-from dataset.base import BaseDatasetLoader, register
 from common.schema import Example
-from common.scoring import extract_boxed_answer, extract_candidate_answer, register_scorer
+from common.scoring import extract_boxed_answer
+from dataset.base import BaseDatasetLoader, normalize_question, register
 
-_SUBJECTS = (
-    "algebra",
-    "counting_and_probability",
-    "geometry",
-    "intermediate_algebra",
-    "number_theory",
-    "prealgebra",
-    "precalculus",
+SUBJECTS = (
+    "algebra", "counting_and_probability", "geometry", "intermediate_algebra",
+    "number_theory", "prealgebra", "precalculus",
 )
 
 
-@register_scorer("math")
-def _score(candidate_answer_text: str, reference_answer: str) -> bool:
-    """Exact-match on the extracted final answer, after light LaTeX
-    normalization. Known gap: no symbolic-equivalence check (e.g. "0.5"
-    vs "\\frac{1}{2}" scores incorrect)."""
-    extracted = extract_candidate_answer(candidate_answer_text)
-    if extracted is None:
-        return False
-    return _normalize(extracted) == _normalize(reference_answer)
-
-
-def _normalize(text: str) -> str:
-    normalized = text.strip()
-    for token in (" ", "\\!", "\\,", "\\;", "\\left", "\\right"):
-        normalized = normalized.replace(token, "")
-    return normalized.strip("$").rstrip(".")
+def _subject_key(name: str) -> str:
+    return name.strip().lower().replace(" & ", "_and_").replace(" ", "_")
 
 
 @register
 class MATHLoader(BaseDatasetLoader):
     name = "math"
-    domain = "math"
-    native_splits = ("train", "test")
 
-    def download(self) -> None:
-        for split in self.native_splits:
-            raw_path = self.raw_dir / f"{split}.jsonl"
-            if raw_path.exists():
-                continue
-            rows = []
-            for subject in _SUBJECTS:
-                ds = load_dataset("EleutherAI/hendrycks_math", subject, split=split)
-                rows.extend(dict(row, subject=subject) for row in ds)
-            with raw_path.open("w", encoding="utf-8") as f:
-                for row in rows:
-                    f.write(json.dumps(row) + "\n")
-            print(f"[math] downloaded {len(rows)} '{split}' examples -> {raw_path}")
+    def load_native_splits(self) -> dict[str, list[Example]]:
+        test = self._load_math500()
+        test_questions = {normalize_question(ex.query) for ex in test}
+        train = [ex for ex in self._load_train() if normalize_question(ex.query) not in test_questions]
+        print(f"[math] removed {self.n_train_raw - len(train)} training problems that are in MATH-500")
+        return {"train": train, "test": test}
 
-    def load_native_split(self, split: str) -> list[Example]:
-        raw_path = self.raw_dir / f"{split}.jsonl"
+    def _load_train(self) -> list[Example]:
+        def fetch():
+            for subject in SUBJECTS:
+                for row in load_dataset("EleutherAI/hendrycks_math", subject, split="train"):
+                    yield dict(row, subject=subject)
+
+        rows = self.cached_rows("train.jsonl", fetch)
         examples = []
-        skipped = 0
-        with raw_path.open(encoding="utf-8") as f:
-            for i, line in enumerate(f):
-                row = json.loads(line)
-                answer = extract_boxed_answer(row["solution"])
-                if answer is None:
-                    skipped += 1
-                    continue
-                level = row["level"].replace("Level ", "") if row.get("level") else None
-                examples.append(
-                    Example(
-                        id=f"math-{split}-{i}",
-                        dataset=self.name,
-                        domain=self.domain,
-                        split=split,
-                        query=row["problem"],
-                        reference_answer=answer,
-                        solution=row["solution"],
-                        difficulty=level,  # "1".."5", per Hendrycks et al.
-                        metadata={"subject": row["subject"]},
-                    )
-                )
-        if skipped:
-            print(f"[math] warning: {skipped} '{split}' examples had no \\boxed{{}} answer and were skipped")
+        for i, row in enumerate(rows):
+            answer = extract_boxed_answer(row["solution"])
+            if answer is None:
+                continue  # no \boxed{} answer in the solution
+            examples.append(Example(
+                id=f"math-train-{i}", dataset=self.name, split="train",
+                query=row["problem"], reference_answer=answer,
+                difficulty=row["level"].replace("Level ", ""), metadata={"subject": row["subject"]},
+            ))
+        self.n_train_raw = len(examples)
         return examples
+
+    def _load_math500(self) -> list[Example]:
+        rows = self.cached_rows("math500.jsonl", lambda: load_dataset("HuggingFaceH4/MATH-500", split="test"))
+        return [
+            Example(
+                id=f"math500-{i}", dataset=self.name, split="test",
+                query=row["problem"], reference_answer=row["answer"],
+                difficulty=str(row["level"]),
+                metadata={"subject": _subject_key(row["subject"]), "unique_id": row["unique_id"]},
+            )
+            for i, row in enumerate(rows)
+        ]

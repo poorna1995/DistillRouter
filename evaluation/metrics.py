@@ -12,7 +12,7 @@ from pathlib import Path
 
 from typing import Optional
 
-from common.config import ROUTING_LABELS, TEACHER_DIR, map_route
+from common.config import LABELS, TEACHER_DIR
 from common.schema import TeacherLabel, read_jsonl
 
 
@@ -21,20 +21,11 @@ def collect_true_pred_vs_teacher(
     dataset_name: str,
     teacher_output_version: str,
     split: str,
-    target_labels: Optional[tuple[str, ...]] = None,
 ) -> tuple[list[str], list[str]]:
     """(y_true, y_pred) -- teacher_route vs predicted route, for whichever
     predictions have a matching teacher label on `split`. predictions is
     a list of {"query_id": ..., "route": ...} dicts; the caller owns how
-    those routes were produced.
-
-    target_labels: the label space `pred["route"]` was produced in (e.g.
-    a checkpoint's model.routing_labels). The teacher's cached label is
-    always 3-way regardless of what the student was trained on, so when
-    target_labels differs from ROUTING_LABELS (e.g. a binary-trained
-    checkpoint), each teacher_route is collapsed via common.config.
-    map_route() before comparison. None (default) skips this -- 3-way vs
-    3-way, unchanged from before this parameter existed."""
+    those routes were produced."""
     teacher_path = TEACHER_DIR / dataset_name / teacher_output_version / f"{split}.jsonl"
     teacher_routes = {label.query_id: label.teacher_route for label in read_jsonl(teacher_path, TeacherLabel)}
 
@@ -43,8 +34,6 @@ def collect_true_pred_vs_teacher(
         teacher_route = teacher_routes.get(pred["query_id"])
         if teacher_route is None:
             continue
-        if target_labels is not None:
-            teacher_route = map_route(teacher_route, target_labels)
         y_true.append(teacher_route)
         y_pred.append(pred["route"])
     return y_true, y_pred
@@ -59,16 +48,13 @@ def classification_metrics(
     the same way as a single-dataset one.
 
     labels: the label space to score over (row/column order for per-tier
-    metrics and the confusion matrix). None (default) falls back to
-    common.config.ROUTING_LABELS (3-way) -- pass a checkpoint's
-    model.routing_labels explicitly when scoring a binary-trained
-    student."""
+    metrics and the confusion matrix). None (default) = common.config.LABELS."""
     from sklearn.metrics import classification_report, confusion_matrix
 
     if not y_true:
         return {"n_matched": 0}
 
-    labels = list(labels) if labels is not None else list(ROUTING_LABELS)
+    labels = list(labels) if labels is not None else list(LABELS)
     report = classification_report(y_true, y_pred, labels=labels, output_dict=True, zero_division=0)
     matrix = confusion_matrix(y_true, y_pred, labels=labels)
 

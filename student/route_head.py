@@ -22,7 +22,12 @@ from typing import Callable
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from transformers import PreTrainedTokenizerBase, TrainerCallback
+
+from common.config import LABELS
+
+assert LABELS == ("small", "large"), "routing_loss builds targets in this column order"
 
 
 def build_route_head(hidden_size: int, num_labels: int, dropout: float = 0.1) -> nn.Sequential:
@@ -33,6 +38,25 @@ def build_route_head(hidden_size: int, num_labels: int, dropout: float = 0.1) ->
         nn.Dropout(dropout),
         nn.Linear(hidden_size, num_labels, dtype=torch.float32),
     )
+
+
+def routing_loss(route_logits: torch.Tensor, soft_large: torch.Tensor, mode: str = "soft") -> torch.Tensor:
+    """Routing loss against the teacher's votes. soft_large = share of votes for "large".
+
+    soft:      cross-entropy against the vote share (3 of 5 votes -> target [0.4, 0.6])
+    hard:      cross-entropy against the majority label only (target [0, 1])
+    hard+soft: cross-entropy on the majority + KL on the vote share (Wu et al. 2026)
+    """
+    soft_target = torch.stack([1 - soft_large, soft_large], dim=-1)  # [P(small), P(large)]
+    hard_target = (soft_large > 0.5).long()                          # 0 = small, 1 = large
+    if mode == "soft":
+        return F.cross_entropy(route_logits, soft_target)
+    if mode == "hard":
+        return F.cross_entropy(route_logits, hard_target)
+    if mode == "hard+soft":
+        kl = F.kl_div(F.log_softmax(route_logits, dim=-1), soft_target, reduction="batchmean")
+        return F.cross_entropy(route_logits, hard_target) + kl
+    raise ValueError(f"Unknown route loss mode {mode!r}: use soft, hard or hard+soft")
 
 
 class SaveEpochCheckpointCallback(TrainerCallback):

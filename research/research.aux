@@ -1,0 +1,185 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{ong2024routellm,zhang2025routerr1}
+\def\@LN@column{1}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
+\citation{hinton2015distilling}
+\def\@LN@column{1}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Problem Formulation}{2}{section.2}\protected@file@percent }
+\newlabel{sec:problem_formulation}{{2}{2}{Problem Formulation}{section.2}{}}
+\def\@LN@column{1}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Binary Routing}{3}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Three-Label Routing}{3}{subsection.2.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Oracle Labels}{3}{subsection.2.3}\protected@file@percent }
+\newlabel{sec:oracle-routing-policy}{{2.3}{3}{Oracle Labels}{subsection.2.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Methodology}{3}{section.3}\protected@file@percent }
+\newlabel{sec:methodology}{{3}{3}{Methodology}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}DistillRouter Framework}{3}{subsection.3.1}\protected@file@percent }
+\newlabel{sec:distillrouter_framework}{{3.1}{3}{DistillRouter Framework}{subsection.3.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Routing-Policy Distillation}{3}{subsection.3.2}\protected@file@percent }
+\newlabel{sec:distillation}{{3.2}{3}{Routing-Policy Distillation}{subsection.3.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Teacher Router}{3}{subsection.3.3}\protected@file@percent }
+\newlabel{sec:teacher-routing}{{3.3}{3}{Teacher Router}{subsection.3.3}{}}
+\citation{suganthan2025adapting}
+\citation{ba2016layer}
+\citation{hendrycks2016gelu}
+\citation{srivastava2014dropout}
+\def\@LN@column{1}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Distilled Router}{4}{subsection.3.4}\protected@file@percent }
+\newlabel{sec:student-router}{{3.4}{4}{Distilled Router}{subsection.3.4}{}}
+\newlabel{eq:head}{{1}{4}{Distilled Router}{equation.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Route-Only Distillation}{4}{subsection.3.5}\protected@file@percent }
+\newlabel{sec:route-only}{{3.5}{4}{Route-Only Distillation}{subsection.3.5}{}}
+\newlabel{eq:lroute}{{2}{4}{Route-Only Distillation}{equation.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.6}Reasoning-Plus-Route Distillation}{4}{subsection.3.6}\protected@file@percent }
+\newlabel{sec:reasoning-plus-route}{{3.6}{4}{Reasoning-Plus-Route Distillation}{subsection.3.6}{}}
+\newlabel{eq:lreason}{{3}{4}{Reasoning-Plus-Route Distillation}{equation.3}{}}
+\newlabel{eq:ltotal}{{4}{4}{Reasoning-Plus-Route Distillation}{equation.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental Setup}{4}{section.4}\protected@file@percent }
+\newlabel{sec:experimental-setup}{{4}{4}{Experimental Setup}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Research Questions}{4}{subsection.4.1}\protected@file@percent }
+\newlabel{sec:research-questions}{{4.1}{4}{Research Questions}{subsection.4.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Routing Label Spaces}{4}{subsection.4.2}\protected@file@percent }
+\newlabel{sec:routing-label-spaces}{{4.2}{4}{Routing Label Spaces}{subsection.4.2}{}}
+\citation{cobbe2021training}
+\citation{hendrycks2021measuring}
+\citation{gemmateam2025gemma3}
+\citation{qwenteam2024qwen25}
+\def\@LN@column{1}
+\@writefile{toc}{\contentsline {paragraph}{Binary Routing.}{5}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Three-Label Routing.}{5}{section*.3}\protected@file@percent }
+\newlabel{sec:scaling-generalization}{{4.2}{5}{Model-Scale Analysis}{section*.4}{}}
+\@writefile{toc}{\contentsline {paragraph}{Model-Scale Analysis.}{5}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Routing Environment}{5}{subsection.4.3}\protected@file@percent }
+\newlabel{sec:datasets}{{4.3}{5}{Routing Environment}{subsection.4.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Evaluation Metrics}{5}{subsection.4.4}\protected@file@percent }
+\newlabel{sec:evaluation_metrics}{{4.4}{5}{Evaluation Metrics}{subsection.4.4}{}}
+\def\@LN@column{1}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Results}{6}{section.5}\protected@file@percent }
+\newlabel{sec:results}{{5}{6}{Results}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Routing Accuracy}{6}{subsection.5.1}\protected@file@percent }
+\newlabel{sec:can-be-distilled}{{5.1}{6}{Routing Accuracy}{subsection.5.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces \textbf  {Routing Accuracy and Deployment Efficiency} (binary label space, 270M backbone; primary configuration). Accuracy is measured against oracle labels; end-to-end accuracy resolves each decision to a candidate and checks answer correctness (\ref {sec:evaluation_metrics}). Pooled across both datasets (1,000 queries/seed), mean $\pm $ SD across 10 seeds. Always-Medium/Large serve every query with one fixed candidate (0~ms latency); their Acc vs.\ Oracle is that constant-label predictor's accuracy against oracle ground truth.}}{6}{table.caption.5}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:mainperf}{{1}{6}{\textbf {Routing Accuracy and Deployment Efficiency} (binary label space, 270M backbone; primary configuration). Accuracy is measured against oracle labels; end-to-end accuracy resolves each decision to a candidate and checks answer correctness (\ref {sec:evaluation_metrics}). Pooled across both datasets (1,000 queries/seed), mean $\pm $ SD across 10 seeds. Always-Medium/Large serve every query with one fixed candidate (0~ms latency); their Acc vs.\ Oracle is that constant-label predictor's accuracy against oracle ground truth}{table.caption.5}{}}
+\def\@LN@column{1}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces \textbf  {F1-Latency Frontier.} Routing Accuracy (y-axis) vs.\ per-query routing latency in ms, log scale (x-axis), for all eight distilled-router configurations plus the teacher, each in its own label space. Color: distillation variant. Shape: backbone size (270M circle, 1B square). Fill: label space (binary filled, three-label hollow). Error bars are $\pm 1$ SD across 10 seeds. Dashed/dotted lines mark the teacher's own oracle macro-F1 in binary (0.591, distinct from but close to the 0.592 accuracy figure in Table~\ref {tab:mainperf}) and three-label (0.380); since these are not on a comparable scale, each family is judged only against its own teacher anchor. Every distilled-router point beats its label-space's teacher on both latency and F1: all eight lie on a superior Pareto frontier.}}{7}{figure.caption.6}\protected@file@percent }
+\newlabel{fig:pareto}{{1}{7}{\textbf {F1-Latency Frontier.} Routing Accuracy (y-axis) vs.\ per-query routing latency in ms, log scale (x-axis), for all eight distilled-router configurations plus the teacher, each in its own label space. Color: distillation variant. Shape: backbone size (270M circle, 1B square). Fill: label space (binary filled, three-label hollow). Error bars are $\pm 1$ SD across 10 seeds. Dashed/dotted lines mark the teacher's own oracle macro-F1 in binary (0.591, distinct from but close to the 0.592 accuracy figure in Table~\ref {tab:mainperf}) and three-label (0.380); since these are not on a comparable scale, each family is judged only against its own teacher anchor. Every distilled-router point beats its label-space's teacher on both latency and F1: all eight lie on a superior Pareto frontier}{figure.caption.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces \textbf  {Cost-Quality Frontier} (binary label space, 270M backbone). Expected cost per query in milliseconds of compute, log scale (x-axis) vs.\ end-to-end accuracy (y-axis). Diamonds: fixed policies that serve every query with one candidate. Star: the teacher. Circles: DistillRouter, route-only (RO) and reasoning-plus-route (RR). Dotted line: the oracle ceiling (0.542), the accuracy of always picking the cheapest candidate that happens to answer correctly, an upper bound no real policy can exceed. Cost is measured in compute latency rather than dollar price (\ref {sec:datasets}).}}{7}{figure.caption.7}\protected@file@percent }
+\newlabel{fig:cost-quality}{{2}{7}{\textbf {Cost-Quality Frontier} (binary label space, 270M backbone). Expected cost per query in milliseconds of compute, log scale (x-axis) vs.\ end-to-end accuracy (y-axis). Diamonds: fixed policies that serve every query with one candidate. Star: the teacher. Circles: DistillRouter, route-only (RO) and reasoning-plus-route (RR). Dotted line: the oracle ceiling (0.542), the accuracy of always picking the cheapest candidate that happens to answer correctly, an upper bound no real policy can exceed. Cost is measured in compute latency rather than dollar price (\ref {sec:datasets})}{figure.caption.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Deployment Efficiency}{7}{subsection.5.2}\protected@file@percent }
+\newlabel{sec:rq3-efficiency}{{5.2}{7}{Deployment Efficiency}{subsection.5.2}{}}
+\citation{koehn2004statistical}
+\citation{koehn2004statistical}
+\def\@LN@column{1}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Reasoning Supervision and Policy Transfer}{8}{subsection.5.3}\protected@file@percent }
+\newlabel{sec:main-result}{{5.3}{8}{Reasoning Supervision and Policy Transfer}{subsection.5.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces \textbf  {Policy Transfer Results.} Macro-F1 against the teacher's decision, mean $\pm $ SD across 10 seeds. $\Delta $ is route-only minus reasoning-plus-route on macro-F1, with a 95\% CI from a paired bootstrap~\citep  {koehn2004statistical} over the 10 seeds; \textbf  {bold} marks a CI that excludes zero.}}{8}{table.caption.8}\protected@file@percent }
+\newlabel{tab:main270m}{{2}{8}{\textbf {Policy Transfer Results.} Macro-F1 against the teacher's decision, mean $\pm $ SD across 10 seeds. $\Delta $ is route-only minus reasoning-plus-route on macro-F1, with a 95\% CI from a paired bootstrap~\citep {koehn2004statistical} over the 10 seeds; \textbf {bold} marks a CI that excludes zero}{table.caption.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Distilled Routers Achieve Higher Oracle Accuracy Than the Teacher}{8}{subsection.5.4}\protected@file@percent }
+\newlabel{sec:distillation-improves-teacher}{{5.4}{8}{Distilled Routers Achieve Higher Oracle Accuracy Than the Teacher}{subsection.5.4}{}}
+\def\@LN@column{1}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces \textbf  {Policy Transfer vs.\ Routing Accuracy}, mean $\pm $ SD across 10 seeds, all four configurations, both metrics. In every row, the oracle accuracy point estimate is at least as high as accuracy against the teacher, though for Binary (1B) reasoning-plus-route the two are within 0.002 of each other, well inside one SD (see prose below); \textbf  {bold} marks the higher-scoring variant in each F1 column, within each configuration, illustrating that accuracy and macro-F1 do not always agree (e.g.\ Binary (1B) favors reasoning-plus-route on accuracy but route-only on F1).}}{9}{table.caption.9}\protected@file@percent }
+\newlabel{tab:teacher-oracle-accuracy}{{3}{9}{\textbf {Policy Transfer vs.\ Routing Accuracy}, mean $\pm $ SD across 10 seeds, all four configurations, both metrics. In every row, the oracle accuracy point estimate is at least as high as accuracy against the teacher, though for Binary (1B) reasoning-plus-route the two are within 0.002 of each other, well inside one SD (see prose below); \textbf {bold} marks the higher-scoring variant in each F1 column, within each configuration, illustrating that accuracy and macro-F1 do not always agree (e.g.\ Binary (1B) favors reasoning-plus-route on accuracy but route-only on F1)}{table.caption.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Policy Transfer Does Not Predict Routing Accuracy}{9}{subsection.5.5}\protected@file@percent }
+\newlabel{sec:teacher-fidelity-oracle}{{5.5}{9}{Policy Transfer Does Not Predict Routing Accuracy}{subsection.5.5}{}}
+\newlabel{sec:fidelity-oracle-270m}{{5.5}{9}{Policy Transfer Does Not Predict Routing Accuracy}{subsection.5.5}{}}
+\def\@LN@column{1}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces \textbf  {Policy Transfer Does Not Predict Routing Accuracy.} Teacher F1 (x-axis, fidelity) vs.\ oracle F1 (y-axis, correctness) for route-only (RO) and reasoning-plus-route (RR) at all four configurations (same marker convention as Figure~\ref {fig:pareto}), the full rows of Table~\ref {tab:teacher-oracle-accuracy}. Dashed connectors join same-configuration pairs; error bars are $\pm 1$ SD across 10 seeds.}}{10}{figure.caption.10}\protected@file@percent }
+\newlabel{fig:fidelity-vs-correctness}{{3}{10}{\textbf {Policy Transfer Does Not Predict Routing Accuracy.} Teacher F1 (x-axis, fidelity) vs.\ oracle F1 (y-axis, correctness) for route-only (RO) and reasoning-plus-route (RR) at all four configurations (same marker convention as Figure~\ref {fig:pareto}), the full rows of Table~\ref {tab:teacher-oracle-accuracy}. Dashed connectors join same-configuration pairs; error bars are $\pm 1$ SD across 10 seeds}{figure.caption.10}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Limitations}{10}{section.6}\protected@file@percent }
+\newlabel{sec:limitations}{{6}{10}{Limitations}{section.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Conclusion}{10}{section.7}\protected@file@percent }
+\newlabel{sec:conclusion}{{7}{10}{Conclusion}{section.7}{}}
+\bibstyle{plainnat}
+\bibdata{references}
+\bibcite{ba2016layer}{{1}{2016}{{Ba et~al.}}{{Ba, Kiros, and Hinton}}}
+\bibcite{cobbe2021training}{{2}{2021}{{Cobbe et~al.}}{{Cobbe, Kosaraju, Bavarian, Chen, Jun, Kaiser, Plappert, Tworek, Hilton, Nakano, Hesse, and Schulman}}}
+\bibcite{gemmateam2025gemma3}{{3}{2025}{{Gemma Team}}{{}}}
+\bibcite{hendrycks2016gelu}{{4}{2016}{{Hendrycks and Gimpel}}{{}}}
+\bibcite{hendrycks2021measuring}{{5}{2021}{{Hendrycks et~al.}}{{Hendrycks, Burns, Kadavath, Arora, Basart, Tang, Song, and Steinhardt}}}
+\bibcite{hinton2015distilling}{{6}{2015}{{Hinton et~al.}}{{Hinton, Vinyals, and Dean}}}
+\bibcite{hsieh2023distilling}{{7}{2023}{{Hsieh et~al.}}{{Hsieh, Li, Yeh, Nakhost, Fujii, Ratner, Krishna, Lee, and Pfister}}}
+\bibcite{koehn2004statistical}{{8}{2004}{{Koehn}}{{}}}
+\bibcite{loshchilov2019decoupled}{{9}{2019}{{Loshchilov and Hutter}}{{}}}
+\bibcite{lu2024zooter}{{10}{2024}{{Lu et~al.}}{{Lu, Yuan, Lin, Lin, Yuan, Zhou, and Zhou}}}
+\bibcite{ong2024routellm}{{11}{2024}{{Ong et~al.}}{{Ong, Almahairi, Wu, Chiang, Wu, Gonzalez, Kadous, and Stoica}}}
+\bibcite{qwenteam2024qwen25}{{12}{2024}{{Qwen Team}}{{}}}
+\bibcite{srivastava2014dropout}{{13}{2014}{{Srivastava et~al.}}{{Srivastava, Hinton, Krizhevsky, Sutskever, and Salakhutdinov}}}
+\bibcite{suganthan2025adapting}{{14}{2025}{{Suganthan et~al.}}{{Suganthan, Moiseev, Yan, Wu, Ni, Han, Zitouni, Alfonseca, Wang, and Dong}}}
+\bibcite{xu2025dualhead}{{15}{2025}{{Xu et~al.}}{{Xu, Zhou, Shukla, Yang, Ruan, Lin, Zou, Liu, and Lakshmanan}}}
+\def\@LN@column{1}
+\bibcite{zhang2025routerr1}{{16}{2025}{{Zhang et~al.}}{{Zhang, Feng, and You}}}
+\citation{ong2024routellm}
+\citation{lu2024zooter}
+\citation{zhang2025routerr1}
+\citation{hsieh2023distilling}
+\citation{xu2025dualhead}
+\def\@LN@column{1}
+\@writefile{toc}{\contentsline {section}{\numberline {A}Appendix}{12}{appendix.A}\protected@file@percent }
+\newlabel{sec:appendix}{{A}{12}{Appendix}{appendix.A}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.1}Related Work}{12}{subsection.A.1}\protected@file@percent }
+\newlabel{sec:related-work}{{A.1}{12}{Related Work}{subsection.A.1}{}}
+\@writefile{toc}{\contentsline {paragraph}{LLM Routing.}{12}{section*.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Routing Distillation and Reasoning Supervision.}{12}{section*.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.2}Dataset Splits}{12}{subsection.A.2}\protected@file@percent }
+\newlabel{sec:splits-appendix}{{A.2}{12}{Dataset Splits}{subsection.A.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Split sizes and the oracle's routing-label distribution (percentage of queries whose cheapest-correct tier is small/medium/ large), measured on the training split, independent of any teacher.}}{12}{table.caption.14}\protected@file@percent }
+\newlabel{tab:splits}{{4}{12}{Split sizes and the oracle's routing-label distribution (percentage of queries whose cheapest-correct tier is small/medium/ large), measured on the training split, independent of any teacher}{table.caption.14}{}}
+\citation{loshchilov2019decoupled}
+\def\@LN@column{1}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Candidate answering models and the teacher router used to generate routing supervision.}}{13}{table.caption.15}\protected@file@percent }
+\newlabel{tab:models}{{5}{13}{Candidate answering models and the teacher router used to generate routing supervision}{table.caption.15}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.3}Candidate Models}{13}{subsection.A.3}\protected@file@percent }
+\newlabel{sec:models-appendix}{{A.3}{13}{Candidate Models}{subsection.A.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.4}Teacher Configuration Details}{13}{subsection.A.4}\protected@file@percent }
+\newlabel{sec:teacher-config-appendix}{{A.4}{13}{Teacher Configuration Details}{subsection.A.4}{}}
+\newlabel{sec:teacher-policy}{{A.4}{13}{Teacher Configuration Details}{subsection.A.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.5}Distilled Router Training}{13}{subsection.A.5}\protected@file@percent }
+\newlabel{sec:training-protocol}{{A.5}{13}{Distilled Router Training}{subsection.A.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.6}Evaluation Metric Definitions}{13}{subsection.A.6}\protected@file@percent }
+\newlabel{sec:eval-metrics-appendix}{{A.6}{13}{Evaluation Metric Definitions}{subsection.A.6}{}}
+\newlabel{sec:routing-policy-transfer}{{A.6}{13}{Policy Transfer}{section*.16}{}}
+\@writefile{toc}{\contentsline {paragraph}{Policy Transfer.}{13}{section*.16}\protected@file@percent }
+\newlabel{sec:routing-correctness}{{A.6}{13}{Routing Accuracy}{section*.17}{}}
+\@writefile{toc}{\contentsline {paragraph}{Routing Accuracy.}{13}{section*.17}\protected@file@percent }
+\newlabel{sec:efficiency}{{A.6}{13}{Deployment Efficiency}{section*.18}{}}
+\@writefile{toc}{\contentsline {paragraph}{Deployment Efficiency.}{13}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.7}Efficiency Across All Configurations}{13}{subsection.A.7}\protected@file@percent }
+\newlabel{sec:efficiency-appendix}{{A.7}{13}{Efficiency Across All Configurations}{subsection.A.7}{}}
+\def\@LN@column{1}
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces \textbf  {Efficiency, Generalization Checks.} Latency and speedup vs.\ the teacher for the label-space/backbone variants beyond the primary configuration, whose latency and speedup are already reported in Table~\ref {tab:mainperf} (\ref {sec:main-result}, \ref {sec:effect-of-scale}). Teacher latency is measured directly (mean over the pooled 1,000-query test split).}}{14}{table.caption.19}\protected@file@percent }
+\newlabel{tab:efficiency}{{6}{14}{\textbf {Efficiency, Generalization Checks.} Latency and speedup vs.\ the teacher for the label-space/backbone variants beyond the primary configuration, whose latency and speedup are already reported in Table~\ref {tab:mainperf} (\ref {sec:main-result}, \ref {sec:effect-of-scale}). Teacher latency is measured directly (mean over the pooled 1,000-query test split)}{table.caption.19}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.8}Scaling Analysis}{14}{subsection.A.8}\protected@file@percent }
+\newlabel{sec:effect-of-scale}{{A.8}{14}{Scaling Analysis}{subsection.A.8}{}}
+\newlabel{sec:fidelity-oracle-1b}{{A.8}{14}{Scaling Analysis}{subsection.A.8}{}}
+\newlabel{sec:binary-ablation}{{A.8}{14}{Scaling Analysis}{subsection.A.8}{}}
+\newlabel{sec:label-space-granularity}{{A.8}{14}{Scaling Analysis}{subsection.A.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.9}Error Analysis}{14}{subsection.A.9}\protected@file@percent }
+\newlabel{sec:error-analysis}{{A.9}{14}{Error Analysis}{subsection.A.9}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces \textbf  {Teacher vs.\ Distilled Router, Both Against Oracle Ground Truth} (binary label space). Row-normalized recall; ``Distilled Router'' is route-only, this paper's primary configuration. On \texttt  {large}-tier queries (bottom row), the teacher is close to a coin flip (49.6\% correct), while the distilled router correctly escalates 68.6\% of the time.}}{14}{figure.caption.20}\protected@file@percent }
+\newlabel{fig:confusion-teacher-vs-student}{{4}{14}{\textbf {Teacher vs.\ Distilled Router, Both Against Oracle Ground Truth} (binary label space). Row-normalized recall; ``Distilled Router'' is route-only, this paper's primary configuration. On \texttt {large}-tier queries (bottom row), the teacher is close to a coin flip (49.6\% correct), while the distilled router correctly escalates 68.6\% of the time}{figure.caption.20}{}}
+\def\@LN@column{1}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.10}Correlation Test Details}{15}{subsection.A.10}\protected@file@percent }
+\newlabel{sec:correlation-appendix}{{A.10}{15}{Correlation Test Details}{subsection.A.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.11}Loss Weight Sweep}{15}{subsection.A.11}\protected@file@percent }
+\newlabel{sec:loss-weighting}{{A.11}{15}{Loss Weight Sweep}{subsection.A.11}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.12}Seed Sensitivity}{15}{subsection.A.12}\protected@file@percent }
+\newlabel{sec:seed-variance}{{A.12}{15}{Seed Sensitivity}{subsection.A.12}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {A.13}Epoch-Count Robustness}{15}{subsection.A.13}\protected@file@percent }
+\newlabel{sec:epoch-count}{{A.13}{15}{Epoch-Count Robustness}{subsection.A.13}{}}
+\def\@LN@column{1}
+\def\@LN@column{1}
+\def\@LN@column{1}
+\citation{koehn2004statistical}
+\def\@LN@column{1}
+\def\@LN@column{1}
+\def\@LN@column{1}
+\citation{cobbe2021training}
+\citation{hendrycks2021measuring}
+\def\@LN@column{1}
+\def\@LN@column{1}
+\gdef \@abspage@last{23}

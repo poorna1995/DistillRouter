@@ -40,6 +40,9 @@ def label_dataset(
         )
 
     processed_path = PROCESSED_DIR / dataset_name / f"{split}.jsonl"
+    if not processed_path.exists():
+        print(f"[{dataset_name}/{split}] no such split, skipping")
+        return {}
     examples = read_jsonl(processed_path)
     if limit is not None:
         examples = examples[:limit]
@@ -55,6 +58,7 @@ def label_dataset(
     cache_hits = 0
     deduped = 0
     newly_labeled = 0
+    skipped = 0
     labels_by_query_text: dict[str, TeacherLabel] = {}
     total = len(examples)
 
@@ -79,6 +83,10 @@ def label_dataset(
             teacher = teacher_cls()
             teacher.allow_self_referential = allow_self_referential_calibration  # thread the escape hatch through
         new_label = teacher.predict(example)
+        if new_label is None:  # e.g. OracleDirectTeacher on an unsolvable question
+            skipped += 1
+            print(f"{progress} -> skipped (no label)", flush=True)
+            continue
         cache.add(new_label)
         labels_by_query_text[example.query] = new_label
         newly_labeled += 1
@@ -86,12 +94,13 @@ def label_dataset(
 
     print(
         f"[{dataset_name}/{split}] done: cache hits={cache_hits}, deduped={deduped}, "
-        f"newly labeled={newly_labeled} -> {output_path} ({len(cache)} total cached)"
+        f"newly labeled={newly_labeled}, skipped={skipped} -> {output_path} ({len(cache)} total cached)"
     )
     return {
         "cache_hits": cache_hits,
         "deduped": deduped,
         "newly_labeled": newly_labeled,
+        "skipped": skipped,
         "total_cached": len(cache),
         "output_path": str(output_path),
     }
